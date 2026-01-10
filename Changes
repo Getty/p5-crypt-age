@@ -1,0 +1,6 @@
+Revision history for Crypt-Age
+
+{{$NEXT}}
+  - Initial release
+  - X25519 recipient support
+  - Compatible with age/rage CLI tools
