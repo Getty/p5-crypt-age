@@ -1,5 +1,7 @@
 Revision history for Crypt-Age
 
+{{$NEXT}}
+
 0.001     2026-01-11 03:51:40Z
   - Initial release
   - X25519 recipient support

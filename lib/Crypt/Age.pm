@@ -62,7 +62,7 @@ command-line tools, and vice versa.
 
 =cut
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 sub generate_keypair {
     my ($class) = @_;
