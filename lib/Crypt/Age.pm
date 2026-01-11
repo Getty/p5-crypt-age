@@ -8,12 +8,87 @@ use Crypt::Age::Primitives;
 use Crypt::Age::Header;
 use namespace::clean;
 
+=head1 SYNOPSIS
+
+    use Crypt::Age;
+
+    # Generate keypair
+    my ($public, $secret) = Crypt::Age->generate_keypair();
+    # $public  = "age1ql3z7hjy..."
+    # $secret  = "AGE-SECRET-KEY-1..."
+
+    # Encrypt data
+    my $encrypted = Crypt::Age->encrypt(
+        plaintext  => "Hello, World!",
+        recipients => [$public],
+    );
+
+    # Decrypt data
+    my $decrypted = Crypt::Age->decrypt(
+        ciphertext => $encrypted,
+        identities => [$secret],
+    );
+
+    # Encrypt file
+    Crypt::Age->encrypt_file(
+        input      => 'secret.txt',
+        output     => 'secret.txt.age',
+        recipients => [$public],
+    );
+
+    # Decrypt file
+    Crypt::Age->decrypt_file(
+        input      => 'secret.txt.age',
+        output     => 'secret.txt',
+        identities => [$secret],
+    );
+
+=head1 DESCRIPTION
+
+Crypt::Age is a pure Perl implementation of the age encryption format,
+compatible with the reference Go implementation (L<https://github.com/FiloSottile/age>)
+and the Rust implementation (L<https://github.com/str4d/rage>).
+
+age is a simple, modern and secure file encryption tool with small explicit
+keys, no config options, and UNIX-style composability. The format specification
+is available at L<https://github.com/C2SP/C2SP/blob/main/age.md>.
+
+This implementation uses X25519 for key exchange, ChaCha20-Poly1305 for
+authenticated encryption, and HKDF-SHA256 for key derivation. All cryptographic
+primitives are provided by L<CryptX>.
+
+Files encrypted with Crypt::Age can be decrypted with the C<age> and C<rage>
+command-line tools, and vice versa.
+
+=cut
+
 our $VERSION = '0.001';
 
 sub generate_keypair {
     my ($class) = @_;
     return Crypt::Age::Keys->generate_keypair;
 }
+
+=method generate_keypair
+
+    my ($public_key, $secret_key) = Crypt::Age->generate_keypair();
+
+Generates a new X25519 keypair for age encryption.
+
+Returns a list of two elements:
+
+=over 4
+
+=item * C<$public_key> - Bech32-encoded public key starting with C<age1>
+
+=item * C<$secret_key> - Bech32-encoded secret key starting with C<AGE-SECRET-KEY-1>
+
+=back
+
+The public key can be shared with others to encrypt files for you. The secret
+key must be kept private and is used to decrypt files encrypted to your public key.
+
+=cut
 
 sub encrypt {
     my ($class, %args) = @_;
@@ -29,12 +104,41 @@ sub encrypt {
     # Create header with wrapped file key for each recipient
     my $header = Crypt::Age::Header->create($file_key, $recipients);
 
-    # Derive payload key and encrypt
-    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key);
+    # Generate payload nonce and derive payload key
+    my $nonce = Crypt::Age::Primitives->generate_payload_nonce;
+    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key, $nonce);
     my $encrypted_payload = Crypt::Age::Primitives->encrypt_payload($payload_key, $plaintext);
 
-    return $header->to_string . $encrypted_payload;
+    # Output: header + nonce + encrypted_payload
+    return $header->to_string . $nonce . $encrypted_payload;
 }
+
+=method encrypt
+
+    my $ciphertext = Crypt::Age->encrypt(
+        plaintext  => $data,
+        recipients => \@public_keys,
+    );
+
+Encrypts plaintext data for one or more recipients.
+
+Parameters:
+
+=over 4
+
+=item * C<plaintext> - The data to encrypt (required)
+
+=item * C<recipients> - ArrayRef of Bech32-encoded public keys (required)
+
+=back
+
+Returns the encrypted data in age format, which includes a text header followed
+by the encrypted payload. The file key is wrapped separately for each recipient,
+allowing any of them to decrypt the data.
+
+The returned data can be written to a file or transmitted directly.
+
+=cut
 
 sub decrypt {
     my ($class, %args) = @_;
@@ -51,12 +155,42 @@ sub decrypt {
     # Unwrap file key using identities
     my $file_key = $header->unwrap_file_key($identities);
 
-    # Extract and decrypt payload
-    my $encrypted_payload = substr($ciphertext, $offset);
-    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key);
+    # Extract nonce (first 16 bytes after header) and encrypted payload
+    my $nonce = substr($ciphertext, $offset, 16);
+    my $encrypted_payload = substr($ciphertext, $offset + 16);
+
+    # Derive payload key using nonce
+    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key, $nonce);
 
     return Crypt::Age::Primitives->decrypt_payload($payload_key, $encrypted_payload);
 }
+
+=method decrypt
+
+    my $plaintext = Crypt::Age->decrypt(
+        ciphertext => $encrypted,
+        identities => \@secret_keys,
+    );
+
+Decrypts age-encrypted data using one or more identities.
+
+Parameters:
+
+=over 4
+
+=item * C<ciphertext> - The age-encrypted data (required)
+
+=item * C<identities> - ArrayRef of Bech32-encoded secret keys (required)
+
+=back
+
+Returns the decrypted plaintext.
+
+The method tries each identity against each recipient stanza in the header until
+one successfully unwraps the file key. Dies if no matching identity is found or
+if the MAC verification fails.
+
+=cut
 
 sub encrypt_file {
     my ($class, %args) = @_;
@@ -82,6 +216,35 @@ sub encrypt_file {
     return 1;
 }
 
+=method encrypt_file
+
+    Crypt::Age->encrypt_file(
+        input      => 'plaintext.txt',
+        output     => 'encrypted.age',
+        recipients => \@public_keys,
+    );
+
+Encrypts a file for one or more recipients.
+
+Parameters:
+
+=over 4
+
+=item * C<input> - Path to input file (required)
+
+=item * C<output> - Path to output file (required)
+
+=item * C<recipients> - ArrayRef of Bech32-encoded public keys (required)
+
+=back
+
+The output file will be in age format and can be decrypted with the C<age> or
+C<rage> command-line tools.
+
+Returns C<1> on success. Dies on error (file not found, permission denied, etc).
+
+=cut
+
 sub decrypt_file {
     my ($class, %args) = @_;
     my $input      = $args{input}      // croak "input required";
@@ -106,98 +269,7 @@ sub decrypt_file {
     return 1;
 }
 
-1;
-
-__END__
-
-=head1 NAME
-
-Crypt::Age - Perl implementation of age encryption (age-encryption.org)
-
-=head1 SYNOPSIS
-
-    use Crypt::Age;
-
-    # Generate keypair
-    my ($public, $secret) = Crypt::Age->generate_keypair();
-    # $public  = "age1ql3z7hjy..."
-    # $secret  = "AGE-SECRET-KEY-1..."
-
-    # Encrypt
-    my $encrypted = Crypt::Age->encrypt(
-        plaintext  => "Hello, World!",
-        recipients => [$public],
-    );
-
-    # Decrypt
-    my $decrypted = Crypt::Age->decrypt(
-        ciphertext => $encrypted,
-        identities => [$secret],
-    );
-
-    # File operations
-    Crypt::Age->encrypt_file(
-        input      => 'secret.txt',
-        output     => 'secret.txt.age',
-        recipients => [$public],
-    );
-
-    Crypt::Age->decrypt_file(
-        input      => 'secret.txt.age',
-        output     => 'secret.txt',
-        identities => [$secret],
-    );
-
-=head1 DESCRIPTION
-
-Crypt::Age is a pure Perl implementation of the age encryption format,
-compatible with the reference Go implementation (filippo.io/age) and
-the Rust implementation (rage).
-
-age is a simple, modern and secure file encryption tool with small explicit
-keys, no config options, and UNIX-style composability.
-
-=head1 METHODS
-
-=head2 generate_keypair
-
-    my ($public_key, $secret_key) = Crypt::Age->generate_keypair();
-
-Generates a new X25519 keypair. Returns the public key (C<age1...>) and
-secret key (C<AGE-SECRET-KEY-1...>) as Bech32-encoded strings.
-
-=head2 encrypt
-
-    my $ciphertext = Crypt::Age->encrypt(
-        plaintext  => $data,
-        recipients => \@public_keys,
-    );
-
-Encrypts plaintext for one or more recipients. Recipients are specified
-as Bech32-encoded public keys (C<age1...>). Returns the encrypted data
-in age format.
-
-=head2 decrypt
-
-    my $plaintext = Crypt::Age->decrypt(
-        ciphertext => $encrypted,
-        identities => \@secret_keys,
-    );
-
-Decrypts age-encrypted data using one or more identities. Identities are
-specified as Bech32-encoded secret keys (C<AGE-SECRET-KEY-1...>).
-
-=head2 encrypt_file
-
-    Crypt::Age->encrypt_file(
-        input      => 'plaintext.txt',
-        output     => 'encrypted.age',
-        recipients => \@public_keys,
-    );
-
-Encrypts a file. The output file will be in age format.
-
-=head2 decrypt_file
+=method decrypt_file
 
     Crypt::Age->decrypt_file(
         input      => 'encrypted.age',
@@ -205,7 +277,24 @@ Encrypts a file. The output file will be in age format.
         identities => \@secret_keys,
     );
 
-Decrypts an age-encrypted file.
+Decrypts an age-encrypted file using one or more identities.
+
+Parameters:
+
+=over 4
+
+=item * C<input> - Path to encrypted input file (required)
+
+=item * C<output> - Path to decrypted output file (required)
+
+=item * C<identities> - ArrayRef of Bech32-encoded secret keys (required)
+
+=back
+
+Returns C<1> on success. Dies if no matching identity is found, if the MAC
+verification fails, or on file I/O errors.
+
+=cut
 
 =head1 KEY FORMAT
 
@@ -229,13 +318,31 @@ This module is designed to be compatible with:
 
 =over 4
 
-=item * L<age|https://github.com/FiloSottile/age> - Reference Go implementation
+=item * L<https://github.com/FiloSottile/age> - Reference Go implementation
 
-=item * L<rage|https://github.com/str4d/rage> - Rust implementation
+=item * L<https://github.com/str4d/rage> - Rust implementation
 
 =back
 
 Files encrypted with Crypt::Age can be decrypted with these tools and vice versa.
+
+=head1 SECURITY
+
+age uses modern cryptographic primitives:
+
+=over 4
+
+=item * X25519 for key agreement (Curve25519 Diffie-Hellman)
+
+=item * ChaCha20-Poly1305 for authenticated encryption
+
+=item * HKDF-SHA256 for key derivation
+
+=back
+
+The file key is randomly generated for each encryption operation. The payload
+is encrypted in 64 KiB chunks with unique nonces derived from a counter and
+final-chunk flag.
 
 =head1 SEE ALSO
 
@@ -245,8 +352,14 @@ Files encrypted with Crypt::Age can be decrypted with these tools and vice versa
 
 =item * L<https://github.com/C2SP/C2SP/blob/main/age.md> - age format specification
 
-=item * L<CryptX> - Cryptographic toolkit used by this module
+=item * L<CryptX> - Cryptographic toolkit providing all primitives
+
+=item * L<Crypt::Age::Keys> - Key generation and encoding
+
+=item * L<Crypt::Age::Primitives> - Low-level cryptographic operations
 
 =back
 
 =cut
+
+1;

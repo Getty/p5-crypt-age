@@ -8,6 +8,36 @@ use Crypt::Age::Primitives;
 use Crypt::Age::Stanza;
 use namespace::clean;
 
+=head1 SYNOPSIS
+
+    use Crypt::Age::Stanza::X25519;
+
+    # Create stanza by wrapping file key for a recipient
+    my $stanza = Crypt::Age::Stanza::X25519->wrap($file_key, $recipient_public_key);
+
+    # Unwrap file key using identity
+    my $file_key = $stanza->unwrap($identity_secret_key);
+
+=head1 DESCRIPTION
+
+This module implements X25519 recipient stanzas for age encryption.
+
+X25519 stanzas use Curve25519 Diffie-Hellman key exchange to derive a shared
+secret, which is then used to wrap the file key with ChaCha20-Poly1305.
+
+The stanza format is:
+
+    -> X25519 <base64-ephemeral-public-key>
+    <base64-wrapped-file-key>
+
+The ephemeral public key is generated randomly for each encryption operation.
+The recipient uses their identity (secret key) to compute the same shared
+secret and unwrap the file key.
+
+This is the primary recipient type for age encryption.
+
+=cut
+
 extends 'Crypt::Age::Stanza';
 
 has '+type' => (
@@ -17,6 +47,14 @@ has '+type' => (
 has ephemeral_public => (
     is => 'ro',
 );
+
+=attr ephemeral_public
+
+The ephemeral X25519 public key used for this stanza (raw bytes).
+
+Generated randomly during wrapping.
+
+=cut
 
 sub wrap {
     my ($class, $file_key, $recipient_public_key) = @_;
@@ -52,6 +90,29 @@ sub wrap {
     );
 }
 
+=method wrap
+
+    my $stanza = Crypt::Age::Stanza::X25519->wrap($file_key, $recipient_public_key);
+
+Wraps a file key for a recipient.
+
+Parameters:
+
+=over 4
+
+=item * C<$file_key> - The 16-byte file key to wrap
+
+=item * C<$recipient_public_key> - Bech32-encoded public key (C<age1...>)
+
+=back
+
+Generates an ephemeral X25519 keypair, performs key exchange with the
+recipient's public key, derives a wrapping key, and wraps the file key.
+
+Returns a L<Crypt::Age::Stanza::X25519> object.
+
+=cut
+
 sub unwrap {
     my ($self, $identity_secret_key) = @_;
 
@@ -86,5 +147,43 @@ sub unwrap {
 
     return $file_key;  # Returns undef if unwrap failed
 }
+
+=method unwrap
+
+    my $file_key = $stanza->unwrap($identity_secret_key);
+
+Attempts to unwrap the file key using an identity.
+
+Parameters:
+
+=over 4
+
+=item * C<$identity_secret_key> - Bech32-encoded secret key (C<AGE-SECRET-KEY-1...>)
+
+=back
+
+Performs key exchange with the ephemeral public key from the stanza, derives
+the wrapping key, and attempts to unwrap the file key.
+
+Returns the 16-byte file key on success, or C<undef> if unwrapping fails
+(wrong identity or corrupted data).
+
+=cut
+
+=head1 SEE ALSO
+
+=over 4
+
+=item * L<Crypt::Age> - Main age encryption module
+
+=item * L<Crypt::Age::Stanza> - Base stanza class
+
+=item * L<Crypt::Age::Primitives> - Low-level cryptographic operations
+
+=item * L<Crypt::Age::Keys> - Key encoding/decoding
+
+=back
+
+=cut
 
 1;

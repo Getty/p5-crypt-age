@@ -6,6 +6,36 @@ use Carp qw(croak);
 use Crypt::PK::X25519;
 use namespace::clean;
 
+=head1 SYNOPSIS
+
+    use Crypt::Age::Keys;
+
+    # Generate keypair
+    my ($public, $secret) = Crypt::Age::Keys->generate_keypair();
+
+    # Encode/decode public keys
+    my $encoded_public = Crypt::Age::Keys->encode_public_key($public_bytes);
+    my $public_bytes = Crypt::Age::Keys->decode_public_key('age1...');
+
+    # Encode/decode secret keys
+    my $encoded_secret = Crypt::Age::Keys->encode_secret_key($secret_bytes);
+    my $secret_bytes = Crypt::Age::Keys->decode_secret_key('AGE-SECRET-KEY-1...');
+
+    # Derive public key from secret key
+    my $public = Crypt::Age::Keys->public_key_from_secret($secret);
+
+=head1 DESCRIPTION
+
+This module provides key generation and Bech32 encoding/decoding for age encryption.
+
+age uses X25519 (Curve25519 Diffie-Hellman) for key agreement. Keys are encoded
+using Bech32, the same encoding used for Bitcoin SegWit addresses (BIP-173).
+
+Public keys use the human-readable part C<age> and are lowercase. Secret keys
+use the human-readable part C<age-secret-key-> and are uppercase.
+
+=cut
+
 # Bech32 character set
 my $BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 my %BECH32_CHAR_TO_VAL = map { substr($BECH32_CHARSET, $_, 1) => $_ } 0..31;
@@ -29,11 +59,39 @@ sub generate_keypair {
     return ($public_key, $secret_key);
 }
 
+=method generate_keypair
+
+    my ($public_key, $secret_key) = Crypt::Age::Keys->generate_keypair();
+
+Generates a new X25519 keypair.
+
+Returns a list of two Bech32-encoded strings:
+
+=over 4
+
+=item * C<$public_key> - Starts with C<age1>, lowercase
+
+=item * C<$secret_key> - Starts with C<AGE-SECRET-KEY-1>, uppercase
+
+=back
+
+=cut
+
 sub encode_public_key {
     my ($class, $bytes) = @_;
     croak "Public key must be 32 bytes" unless length($bytes) == 32;
     return $class->bech32_encode($HRP_PUBLIC, $bytes);
 }
+
+=method encode_public_key
+
+    my $encoded = Crypt::Age::Keys->encode_public_key($public_bytes);
+
+Encodes a 32-byte X25519 public key as a Bech32 string with HRP C<age>.
+
+Returns a lowercase string starting with C<age1>.
+
+=cut
 
 sub decode_public_key {
     my ($class, $encoded) = @_;
@@ -44,11 +102,31 @@ sub decode_public_key {
     return $bytes;
 }
 
+=method decode_public_key
+
+    my $public_bytes = Crypt::Age::Keys->decode_public_key('age1...');
+
+Decodes a Bech32-encoded age public key to raw bytes.
+
+Dies if the HRP is not C<age> or if the decoded data is not 32 bytes.
+
+=cut
+
 sub encode_secret_key {
     my ($class, $bytes) = @_;
     croak "Secret key must be 32 bytes" unless length($bytes) == 32;
     return uc($class->bech32_encode($HRP_SECRET, $bytes));
 }
+
+=method encode_secret_key
+
+    my $encoded = Crypt::Age::Keys->encode_secret_key($secret_bytes);
+
+Encodes a 32-byte X25519 secret key as a Bech32 string with HRP C<age-secret-key->.
+
+Returns an uppercase string starting with C<AGE-SECRET-KEY-1>.
+
+=cut
 
 sub decode_secret_key {
     my ($class, $encoded) = @_;
@@ -59,6 +137,16 @@ sub decode_secret_key {
     return $bytes;
 }
 
+=method decode_secret_key
+
+    my $secret_bytes = Crypt::Age::Keys->decode_secret_key('AGE-SECRET-KEY-1...');
+
+Decodes a Bech32-encoded age secret key to raw bytes.
+
+Dies if the HRP is not C<age-secret-key-> or if the decoded data is not 32 bytes.
+
+=cut
+
 sub public_key_from_secret {
     my ($class, $secret_key) = @_;
     my $secret_bytes = $class->decode_secret_key($secret_key);
@@ -67,6 +155,18 @@ sub public_key_from_secret {
     my $public_bytes = $pk->export_key_raw('public');
     return $class->encode_public_key($public_bytes);
 }
+
+=method public_key_from_secret
+
+    my $public_key = Crypt::Age::Keys->public_key_from_secret($secret_key);
+
+Derives the public key from a secret key.
+
+Takes a Bech32-encoded secret key and returns the corresponding Bech32-encoded
+public key. This is useful for when you have a secret key and need to know
+what public key it corresponds to.
+
+=cut
 
 # Bech32 implementation (BIP-173)
 
@@ -188,5 +288,19 @@ sub _convert_bits {
 
     return \@result;
 }
+
+=head1 SEE ALSO
+
+=over 4
+
+=item * L<Crypt::Age> - Main age encryption module
+
+=item * L<Crypt::PK::X25519> - X25519 key handling from L<CryptX>
+
+=item * L<https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki> - Bech32 specification
+
+=back
+
+=cut
 
 1;

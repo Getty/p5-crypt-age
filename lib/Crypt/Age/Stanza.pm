@@ -6,20 +6,92 @@ use Carp qw(croak);
 use MIME::Base64 qw(encode_base64 decode_base64);
 use namespace::clean;
 
+=head1 SYNOPSIS
+
+    use Crypt::Age::Stanza;
+
+    # Create a stanza
+    my $stanza = Crypt::Age::Stanza->new(
+        type => 'X25519',
+        args => ['base64-encoded-ephemeral-key'],
+        body => $wrapped_file_key_bytes,
+    );
+
+    # Serialize to string
+    my $text = $stanza->to_string;
+    # -> X25519 base64-encoded-ephemeral-key
+    # base64-wrapped-file-key
+
+=head1 DESCRIPTION
+
+This is the base class for age recipient stanzas.
+
+A stanza represents one way to unwrap the file key. Each recipient in an age
+file gets their own stanza. The stanza contains the information needed to
+unwrap the file key if you have the corresponding private identity.
+
+Stanzas have three parts:
+
+=over 4
+
+=item * C<type> - The recipient type (e.g., C<X25519>, C<scrypt>)
+
+=item * C<args> - Type-specific arguments (e.g., ephemeral public key)
+
+=item * C<body> - The wrapped file key (base64-encoded in the file)
+
+=back
+
+The stanza format in an age file is:
+
+    -> type arg1 arg2 ...
+    base64-wrapped-key-line1
+    base64-wrapped-key-line2
+    ...
+
+Subclasses like L<Crypt::Age::Stanza::X25519> implement the actual wrapping and
+unwrapping logic for specific recipient types.
+
+=cut
+
 has type => (
     is       => 'ro',
     required => 1,
 );
+
+=attr type
+
+The stanza type (e.g., C<X25519>, C<scrypt>).
+
+Required.
+
+=cut
 
 has args => (
     is      => 'ro',
     default => sub { [] },
 );
 
+=attr args
+
+ArrayRef of type-specific arguments.
+
+For X25519 stanzas, this is the base64-encoded ephemeral public key.
+
+=cut
+
 has body => (
     is      => 'ro',
     default => '',
 );
+
+=attr body
+
+The wrapped file key as raw bytes.
+
+This is base64-encoded when serialized to the age file format.
+
+=cut
 
 sub encode_body_base64 {
     my ($self) = @_;
@@ -59,10 +131,57 @@ sub to_string {
     return join("\n", @lines);
 }
 
+=method to_string
+
+    my $text = $stanza->to_string;
+
+Serializes the stanza to age file format.
+
+Returns a multi-line string with the stanza header (C<-E<gt> type args...>) and
+base64-encoded body wrapped at 64 characters per line.
+
+=cut
+
 sub to_bytes_for_mac {
     my ($self) = @_;
     # For MAC computation, stanzas are serialized as in the header
     return $self->to_string . "\n";
 }
+
+=head1 FUNCTIONS
+
+=func encode_base64_no_padding
+
+    my $encoded = Crypt::Age::Stanza::encode_base64_no_padding($bytes);
+
+Encodes bytes to base64 without padding (no trailing C<=> characters).
+
+This is the encoding used for all base64 in the age format.
+
+=cut
+
+=func decode_base64_no_padding
+
+    my $bytes = Crypt::Age::Stanza::decode_base64_no_padding($encoded);
+
+Decodes base64 without padding.
+
+Automatically adds back the padding before decoding.
+
+=cut
+
+=head1 SEE ALSO
+
+=over 4
+
+=item * L<Crypt::Age> - Main age encryption module
+
+=item * L<Crypt::Age::Header> - Header parsing and generation
+
+=item * L<Crypt::Age::Stanza::X25519> - X25519 recipient stanza implementation
+
+=back
+
+=cut
 
 1;

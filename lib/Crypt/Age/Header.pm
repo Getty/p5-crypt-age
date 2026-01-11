@@ -8,6 +8,48 @@ use Crypt::Age::Stanza;
 use Crypt::Age::Stanza::X25519;
 use namespace::clean;
 
+=head1 SYNOPSIS
+
+    use Crypt::Age::Header;
+
+    # Create header for encryption
+    my $header = Crypt::Age::Header->create($file_key, \@recipient_public_keys);
+    my $header_text = $header->to_string;
+
+    # Parse header during decryption
+    my $offset = 0;
+    my $header = Crypt::Age::Header->parse(\$ciphertext, \$offset);
+
+    # Unwrap file key
+    my $file_key = $header->unwrap_file_key(\@identity_secret_keys);
+
+=head1 DESCRIPTION
+
+This module handles parsing and generation of age file headers.
+
+An age file header is a text section at the beginning of an age file that contains:
+
+=over 4
+
+=item * Version line (C<age-encryption.org/v1>)
+
+=item * One or more recipient stanzas (each wrapping the file key)
+
+=item * MAC footer (authenticates the header)
+
+=back
+
+The header format is:
+
+    age-encryption.org/v1
+    -> X25519 <base64-ephemeral-public-key>
+    <base64-wrapped-file-key>
+    --- <base64-mac>
+
+This is an internal module used by L<Crypt::Age>.
+
+=cut
+
 use constant VERSION_LINE => "age-encryption.org/v1";
 
 has stanzas => (
@@ -15,9 +57,25 @@ has stanzas => (
     default => sub { [] },
 );
 
+=attr stanzas
+
+ArrayRef of L<Crypt::Age::Stanza> objects representing recipient stanzas.
+
+Each stanza wraps the file key for one recipient.
+
+=cut
+
 has mac => (
     is => 'rw',
 );
+
+=attr mac
+
+The header MAC as raw bytes (32 bytes).
+
+Used to authenticate the header and verify that the correct file key was unwrapped.
+
+=cut
 
 sub create {
     my ($class, $file_key, $recipients) = @_;
@@ -41,6 +99,27 @@ sub create {
     return $header;
 }
 
+=method create
+
+    my $header = Crypt::Age::Header->create($file_key, \@recipients);
+
+Creates a new header for encrypting to multiple recipients.
+
+Parameters:
+
+=over 4
+
+=item * C<$file_key> - The 16-byte file key to wrap
+
+=item * C<\@recipients> - ArrayRef of Bech32-encoded public keys (C<age1...>)
+
+=back
+
+Returns a L<Crypt::Age::Header> object with stanzas for each recipient and a
+computed MAC.
+
+=cut
+
 sub to_string {
     my ($self) = @_;
 
@@ -56,6 +135,17 @@ sub to_string {
 
     return join("\n", @lines) . "\n";
 }
+
+=method to_string
+
+    my $header_text = $header->to_string;
+
+Serializes the header to text format.
+
+Returns a string containing the version line, all stanzas, and the MAC footer,
+suitable for writing to the beginning of an age file.
+
+=cut
 
 sub _header_bytes_for_mac {
     my ($self) = @_;
@@ -142,6 +232,29 @@ sub parse {
     );
 }
 
+=method parse
+
+    my $header = Crypt::Age::Header->parse(\$data, \$offset);
+
+Parses an age header from encrypted data.
+
+Parameters:
+
+=over 4
+
+=item * C<\$data> - ScalarRef to the complete age file data
+
+=item * C<\$offset> - ScalarRef to offset, updated to point past the header
+
+=back
+
+Returns a L<Crypt::Age::Header> object. The C<$offset> is updated to point to
+the start of the payload.
+
+Dies if the header format is invalid.
+
+=cut
+
 sub verify_mac {
     my ($self, $file_key) = @_;
 
@@ -150,6 +263,17 @@ sub verify_mac {
 
     return $self->mac eq $expected_mac;
 }
+
+=method verify_mac
+
+    my $ok = $header->verify_mac($file_key);
+
+Verifies that the header MAC is correct for the given file key.
+
+Returns true if the MAC is valid, false otherwise. Used to confirm that the
+correct file key was unwrapped from a stanza.
+
+=cut
 
 sub unwrap_file_key {
     my ($self, $identities) = @_;
@@ -167,5 +291,40 @@ sub unwrap_file_key {
 
     croak "No matching identity found";
 }
+
+=method unwrap_file_key
+
+    my $file_key = $header->unwrap_file_key(\@identities);
+
+Attempts to unwrap the file key using one or more identities.
+
+Parameters:
+
+=over 4
+
+=item * C<\@identities> - ArrayRef of Bech32-encoded secret keys (C<AGE-SECRET-KEY-1...>)
+
+=back
+
+Tries each identity against each stanza until one successfully unwraps the file
+key and verifies the MAC. Returns the 16-byte file key.
+
+Dies if no matching identity is found or if MAC verification fails.
+
+=cut
+
+=head1 SEE ALSO
+
+=over 4
+
+=item * L<Crypt::Age> - Main age encryption module
+
+=item * L<Crypt::Age::Stanza> - Base stanza class
+
+=item * L<Crypt::Age::Stanza::X25519> - X25519 recipient stanza
+
+=back
+
+=cut
 
 1;
