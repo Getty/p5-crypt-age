@@ -166,16 +166,24 @@ sub _header_bytes_for_mac {
 sub parse {
     my ($class, $data_ref, $offset_ref) = @_;
 
-    my $data = $$data_ref;
     my $pos = $$offset_ref // 0;
 
     # Find header end (the line starting with ---)
-    my $header_end = index($data, "\n---", $pos);
+    my $header_end = index($$data_ref, "\x{0a}---", $pos);
     croak "Invalid age file: no header footer found" if $header_end < 0;
 
-    # Extract header text
-    my $header_text = substr($data, $pos, $header_end - $pos + 1);
-    my @lines = split /\n/, $header_text;
+    # Extract header text up to the header's footer, including the LF
+    my $header_text = substr($$data_ref, $pos, $header_end - $pos + 1);
+
+    # Parse MAC line -->  end = "--- " 43base64char LF
+    $pos = $header_end + 1;  # Position after the newline before ---
+    my $end_line = substr($$data_ref, $pos, 4 + 43 + 1);
+    my ($mac64) = $end_line =~ m{\A ---\x{20} (\S{43}) \x{0a} \z}mxs
+        or croak "Invalid footer: <$end_line>";
+    my $mac = Crypt::Age::Stanza::decode_base64_no_padding($mac64);
+    $pos += length($end_line);
+
+    my @lines = split /\x{0a}/, $header_text;
 
     # Check version
     my $version_line = shift @lines;
@@ -184,47 +192,41 @@ sub parse {
     # Parse stanzas
     my @stanzas;
     while (@lines) {
+        my $n = @stanzas + 1;  # for diagnostic messages
         my $line = shift @lines;
-        last if $line =~ /^---/;
+        my ($argline) = $line =~ m{\A ->\x{20} (\S+ (?:\x{20}\S+)*) \z}mxs
+            or croak "Invalid age stanza #$n start line: <$line>";
+        my ($type, @args) = split m{\x{20}}mxs, $argline;
 
-        if ($line =~ /^-> (\S+)\s*(.*)/) {
-            my $type = $1;
-            my @args = split /\s+/, $2;
-
-            # Read body lines
-            my $body_b64 = '';
-            while (@lines && $lines[0] !~ /^->/ && $lines[0] !~ /^---/) {
-                my $body_line = shift @lines;
-                $body_b64 .= $body_line;
-                last if length($body_line) < 64;  # Short line ends body
-            }
-
-            my $body = Crypt::Age::Stanza::decode_base64_no_padding($body_b64);
-
-            my $stanza_class = 'Crypt::Age::Stanza';
-            if ($type eq 'X25519') {
-                $stanza_class = 'Crypt::Age::Stanza::X25519';
-            }
-
-            push @stanzas, $stanza_class->new(
-                type => $type,
-                args => \@args,
-                body => $body,
-            );
+        # Read body lines
+        my $body_b64 = '';
+        my $body_completed = 0;
+        while (@lines && ! $body_completed) {
+            my $body_line = shift @lines;
+            my $len = length($body_line);
+            croak "Invalid age stanza #$n body" if $len > 64;
+            $body_b64 .= $body_line;
+            $body_completed = $len < 64;
         }
+        # "The body MUST end with a line shorter than 64 characters, which
+        #  MAY be empty."
+        croak "Invalid age stanza #$n body" unless $body_completed;
+        my $body = Crypt::Age::Stanza::decode_base64_no_padding($body_b64);
+
+        my $stanza_class = 'Crypt::Age::Stanza';
+        if ($type eq 'X25519') {
+            $stanza_class = 'Crypt::Age::Stanza::X25519';
+        }
+
+        push @stanzas, $stanza_class->new(
+            type => $type,
+            args => \@args,
+            body => $body,
+        );
     }
 
-    # Parse MAC line
-    $pos = $header_end + 1;  # Position after the newline before ---
-    my $footer_end = index($data, "\n", $pos);
-    $footer_end = length($data) if $footer_end < 0;
-
-    my $footer_line = substr($data, $pos, $footer_end - $pos);
-    croak "Invalid footer: $footer_line" unless $footer_line =~ /^--- (\S+)$/;
-    my $mac = Crypt::Age::Stanza::decode_base64_no_padding($1);
-
     # Update offset to point after header
-    $$offset_ref = $footer_end + 1;
+    $$offset_ref = $pos;
 
     return $class->new(
         stanzas => \@stanzas,
