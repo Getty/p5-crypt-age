@@ -8,6 +8,9 @@ use Crypt::AuthEnc::ChaCha20Poly1305;
 use Crypt::KeyDerivation qw(hkdf);
 use Crypt::Mac::HMAC qw(hmac);
 use Crypt::PRNG qw(random_bytes);
+
+use constant READ_ATTEMPTS => 3;
+
 use namespace::clean;
 
 =head1 SYNOPSIS
@@ -266,32 +269,17 @@ then computes HMAC-SHA256 of the header. Returns 32 bytes.
 sub encrypt_payload {
     my ($class, $payload_key, $plaintext) = @_;
 
-    my @chunks;
-    my $offset = 0;
-    my $counter = 0;
-    my $remaining = length($plaintext);
+    open my $ifh, '<:raw', \$plaintext or croak "Cannot open input string: $!";
 
-    while ($remaining > 0 || $counter == 0) {
-        my $chunk_size = $remaining > CHUNK_SIZE ? CHUNK_SIZE : $remaining;
-        my $chunk = substr($plaintext, $offset, $chunk_size);
-        my $is_final = ($remaining <= CHUNK_SIZE);
+    my $output = '';
+    open my $ofh, '>:raw', \$output or croak "Cannot open output string: $!";
 
-        my $nonce = $class->_make_nonce($counter, $is_final);
-        my $ae = Crypt::AuthEnc::ChaCha20Poly1305->new($payload_key, $nonce);
+    $class->encrypt_payload_fh($payload_key, $ifh, $ofh);
 
-        my $ciphertext = $ae->encrypt_add($chunk);
-        my $tag = $ae->encrypt_done;
+    close $ofh or croak "Cannot close output string: $!";
+    close $ifh  or croak "Cannot close input string: $!";
 
-        push @chunks, $ciphertext . $tag;
-
-        $offset += $chunk_size;
-        $remaining -= $chunk_size;
-        $counter++;
-
-        last if $is_final;
-    }
-
-    return join('', @chunks);
+    return $output;
 }
 
 =method encrypt_payload
@@ -306,40 +294,43 @@ encrypted chunks.
 
 =cut
 
-sub decrypt_payload {
-    my ($class, $payload_key, $ciphertext) = @_;
+sub encrypt_payload_fh {
+    my ($class, $payload_key, $ifh, $ofh) = @_;
 
-    my @plaintext_chunks;
-    my $offset = 0;
     my $counter = 0;
-    my $remaining = length($ciphertext);
-
-    while ($remaining > 0) {
-        # Each encrypted chunk is plaintext + 16 byte tag
-        my $max_encrypted_chunk = CHUNK_SIZE + TAG_SIZE;
-        my $chunk_size = $remaining > $max_encrypted_chunk ? $max_encrypted_chunk : $remaining;
-
-        my $encrypted_chunk = substr($ciphertext, $offset, $chunk_size);
-        my $is_final = ($remaining <= $max_encrypted_chunk);
-
-        my $ct = substr($encrypted_chunk, 0, -TAG_SIZE);
-        my $tag = substr($encrypted_chunk, -TAG_SIZE);
+    my $is_final = 0;
+    while (! $is_final) {
+        my $chunk = $class->paranoid_read($ifh, CHUNK_SIZE);
+        $is_final = eof($ifh);
 
         my $nonce = $class->_make_nonce($counter, $is_final);
         my $ae = Crypt::AuthEnc::ChaCha20Poly1305->new($payload_key, $nonce);
 
-        my $plaintext = $ae->decrypt_add($ct);
-        croak "Payload authentication failed at chunk $counter"
-            unless $ae->decrypt_done($tag);
+        my $ciphertext = $ae->encrypt_add($chunk);
+        my $tag = $ae->encrypt_done;
 
-        push @plaintext_chunks, $plaintext;
+        print {$ofh} $ciphertext, $tag;
 
-        $offset += $chunk_size;
-        $remaining -= $chunk_size;
         $counter++;
     }
 
-    return join('', @plaintext_chunks);
+    return;
+}
+
+sub decrypt_payload {
+    my ($class, $payload_key, $ciphertext) = @_;
+
+    open my $ifh, '<:raw', \$ciphertext or croak "Cannot open input string: $!";
+
+    my $output = '';
+    open my $ofh, '>:raw', \$output or croak "Cannot open output string: $!";
+
+    $class->decrypt_payload_fh($payload_key, $ifh, $ofh);
+
+    close $ofh or croak "Cannot close output string: $!";
+    close $ifh  or croak "Cannot close input string: $!";
+
+    return $output;
 }
 
 =method decrypt_payload
@@ -351,6 +342,33 @@ Decrypts a chunked payload encrypted with C<encrypt_payload>.
 Dies if any chunk fails authentication. Returns the decrypted plaintext.
 
 =cut
+
+sub decrypt_payload_fh {
+    my ($class, $payload_key, $ifh, $ofh) = @_;
+
+    my $max_encrypted_chunk = CHUNK_SIZE + TAG_SIZE;
+    my $counter = 0;
+    my $is_final = 0;
+    while (! $is_final) {
+        # Each encrypted chunk is plaintext + 16 byte tag
+        my $ct = $class->paranoid_read($ifh, $max_encrypted_chunk);
+        my $tag = substr($ct, -TAG_SIZE, TAG_SIZE, '');
+
+        $is_final = eof($ifh);
+        my $nonce = $class->_make_nonce($counter, $is_final);
+        my $ae = Crypt::AuthEnc::ChaCha20Poly1305->new($payload_key, $nonce);
+
+        my $plaintext = $ae->decrypt_add($ct);
+        croak "Payload authentication failed at chunk $counter"
+            unless $ae->decrypt_done($tag);
+
+        print {$ofh} $plaintext;
+
+        $counter++;
+    }
+
+    return;
+}
 
 sub _make_nonce {
     my ($class, $counter, $is_final) = @_;
@@ -365,6 +383,29 @@ sub _make_nonce {
     $nonce .= pack('C', $is_final ? 1 : 0);              # Last byte: final flag
 
     return $nonce;
+}
+
+sub paranoid_read {
+    my ($class, $fh, $length) = @_;
+    my $retval = '';
+    my $attempts = READ_ATTEMPTS;
+    while ($length > 0 && $attempts > 0) {
+        my $buffer = '';
+        my $n_read = read($fh, $buffer, $length);
+        croak "read(): $!" if ! defined($n_read);
+        if ($n_read == 0) {
+            last if eof($fh); # no more data, we're good
+            --$attempts;
+            next;
+        }
+
+        # reset attempts after successful read of *some* data
+        $attempts = READ_ATTEMPTS;
+        $retval .= $buffer;
+        $length -= $n_read;
+    }
+    return $retval if $attempts > 0;
+    croak "could not get requested data up to the end";
 }
 
 =head1 SEE ALSO
