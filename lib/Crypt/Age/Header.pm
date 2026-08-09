@@ -77,6 +77,18 @@ Used to authenticate the header and verify that the correct file key was unwrapp
 
 =cut
 
+has _bytes => (
+    is => 'lazy',
+);
+
+=attr bytes
+
+The header bytes up to and including the '---' before the MAC.
+
+Used to authenticate the header and verify that the correct file key was unwrapped.
+
+=cut
+
 sub create {
     my ($class, $file_key, $recipients) = @_;
 
@@ -92,7 +104,7 @@ sub create {
     my $header = $class->new(stanzas => \@stanzas);
 
     # Compute and set MAC
-    my $header_bytes = $header->_header_bytes_for_mac;
+    my $header_bytes = $header->_bytes;
     my $mac = Crypt::Age::Primitives->compute_header_mac($file_key, $header_bytes);
     $header->mac($mac);
 
@@ -147,7 +159,7 @@ suitable for writing to the beginning of an age file.
 
 =cut
 
-sub _header_bytes_for_mac {
+sub _build__bytes {
     my ($self) = @_;
 
     my @lines = (VERSION_LINE);
@@ -163,54 +175,55 @@ sub _header_bytes_for_mac {
     return join("\n", @lines);
 }
 
-sub parse {
-    my ($class, $data_ref, $offset_ref) = @_;
+sub parse_from_fh {
+    my ($class, $fh) = @_;
 
-    my $pos = $$offset_ref // 0;
+    # make sure to read the whole thing in the correct way
+    binmode($fh, ':raw') or croak "binmode: $!";
+    local $/ = "\x{0a}";
 
-    # Find header end (the line starting with ---)
-    my $header_end = index($$data_ref, "\x{0a}---", $pos);
-    croak "Invalid age file: no header footer found" if $header_end < 0;
-
-    # Extract header text up to the header's footer, including the LF
-    my $header_text = substr($$data_ref, $pos, $header_end - $pos + 1);
-
-    # Parse MAC line -->  end = "--- " 43base64char LF
-    $pos = $header_end + 1;  # Position after the newline before ---
-    my $end_line = substr($$data_ref, $pos, 4 + 43 + 1);
-    my ($mac64) = $end_line =~ m{\A ---\x{20} (\S{43}) \x{0a} \z}mxs
-        or croak "Invalid footer: <$end_line>";
-    my $mac = Crypt::Age::Stanza::decode_base64_no_padding($mac64);
-    $pos += length($end_line);
-
-    my @lines = split /\x{0a}/, $header_text;
+    # $header will eventually contain the whole header, for MAC validation.
+    # We start from the first line.
+    my $bytes = <$fh>;
 
     # Check version
-    my $version_line = shift @lines;
+    chomp(my $version_line = $bytes); # remove \x{0a}
     croak "Invalid age version: $version_line" unless $version_line eq VERSION_LINE;
 
-    # Parse stanzas
-    my @stanzas;
-    while (@lines) {
-        my $n = @stanzas + 1;  # for diagnostic messages
-        my $line = shift @lines;
-        my ($argline) = $line =~ m{\A ->\x{20} (\S+ (?:\x{20}\S+)*) \z}mxs
-            or croak "Invalid age stanza #$n start line: <$line>";
-        my ($type, @args) = split m{\x{20}}mxs, $argline;
+    # read the rest of the header
+    my (@stanzas, $mac);
+    my $n = 0;
+    while (<$fh>) {
+        if (my ($mac64) = m{\A ---\x{20} (\S{43}) \x{0a} \z}mxs) {
+            $bytes .= '---';
+            $mac = Crypt::Age::Stanza::decode_base64_no_padding($mac64);
+            last;
+        }
+        ++$n;
+        my ($ta) = m{\A ->\x{20} (\S+ (?:\x{20}\S+)*) \x{0a} \z}mxs
+            or croak "Invalid age stanza #$n start line: <$_>";
 
-        # Read body lines
+        $bytes .= $_;
+
+        # Read stanza's body lines
         my $body_b64 = '';
         my $body_completed = 0;
-        while (@lines && ! $body_completed) {
-            my $body_line = shift @lines;
-            my $len = length($body_line);
+        while (<$fh>) {
+            $bytes .= $_;
+            chomp;
+            my $len = length($_);
             croak "Invalid age stanza #$n body" if $len > 64;
-            $body_b64 .= $body_line;
-            $body_completed = $len < 64;
+            $body_b64 .= $_;
+            if ($len < 64) {
+                $body_completed = 1;
+                last;
+            }
         }
         # "The body MUST end with a line shorter than 64 characters, which
         #  MAY be empty."
         croak "Invalid age stanza #$n body" unless $body_completed;
+
+        my ($type, @args) = split m{\x{20}}mxs, $ta;
         my $body = Crypt::Age::Stanza::decode_base64_no_padding($body_b64);
 
         my $stanza_class = 'Crypt::Age::Stanza';
@@ -224,14 +237,22 @@ sub parse {
             body => $body,
         );
     }
-
-    # Update offset to point after header
-    $$offset_ref = $pos;
+    croak "Invalid age file, no valid header MAC line" unless length($mac // '');
 
     return $class->new(
         stanzas => \@stanzas,
+        bytes   => $bytes,
         mac     => $mac,
     );
+}
+
+sub parse {
+    my ($class, $data_ref, $offset_ref) = @_;
+    open my $fh, '<:raw', $data_ref or croak "Invalid age input: cannot read";
+    seek($fh, $$offset_ref, 0);
+    my $retval = $class->parse_from_fh($fh);
+    $$offset_ref = tell($fh);
+    return $retval;
 }
 
 =method parse
@@ -260,7 +281,7 @@ Dies if the header format is invalid.
 sub verify_mac {
     my ($self, $file_key) = @_;
 
-    my $header_bytes = $self->_header_bytes_for_mac;
+    my $header_bytes = $self->_bytes;
     my $expected_mac = Crypt::Age::Primitives->compute_header_mac($file_key, $header_bytes);
 
     return $self->mac eq $expected_mac;
