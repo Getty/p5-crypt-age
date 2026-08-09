@@ -92,25 +92,18 @@ key must be kept private and is used to decrypt files encrypted to your public k
 
 sub encrypt {
     my ($class, %args) = @_;
+
     my $plaintext  = $args{plaintext}  // croak "plaintext required";
     my $recipients = $args{recipients} // croak "recipients required";
 
-    croak "recipients must be an array ref" unless ref($recipients) eq 'ARRAY';
-    croak "at least one recipient required" unless @$recipients;
+    open my $ifh, '<:raw', \$plaintext or die "open on input string: $!";
 
-    # Generate random file key
-    my $file_key = Crypt::Age::Primitives->generate_file_key;
+    my $output = '';
+    open my $ofh, '>:raw', \$output or die "open on output string: $!";
 
-    # Create header with wrapped file key for each recipient
-    my $header = Crypt::Age::Header->create($file_key, $recipients);
+    $class->_encrypt_fh($ifh, $ofh, $recipients);
 
-    # Generate payload nonce and derive payload key
-    my $nonce = Crypt::Age::Primitives->generate_payload_nonce;
-    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key, $nonce);
-    my $encrypted_payload = Crypt::Age::Primitives->encrypt_payload($payload_key, $plaintext);
-
-    # Output: header + nonce + encrypted_payload
-    return $header->to_string . $nonce . $encrypted_payload;
+    return $output;
 }
 
 =method encrypt
@@ -142,27 +135,18 @@ The returned data can be written to a file or transmitted directly.
 
 sub decrypt {
     my ($class, %args) = @_;
+
     my $ciphertext = $args{ciphertext} // croak "ciphertext required";
     my $identities = $args{identities} // croak "identities required";
 
-    croak "identities must be an array ref" unless ref($identities) eq 'ARRAY';
-    croak "at least one identity required" unless @$identities;
+    open my $ifh, '<:raw', \$ciphertext or die "open on input string: $!";
 
-    # Parse header
-    my $offset = 0;
-    my $header = Crypt::Age::Header->parse(\$ciphertext, \$offset);
+    my $output = '';
+    open my $ofh, '>:raw', \$output or die "open on output string: $!";
 
-    # Unwrap file key using identities
-    my $file_key = $header->unwrap_file_key($identities);
+    $class->_decrypt_fh($ifh, $ofh, $identities);
 
-    # Extract nonce (first 16 bytes after header) and encrypted payload
-    my $nonce = substr($ciphertext, $offset, 16);
-    my $encrypted_payload = substr($ciphertext, $offset + 16);
-
-    # Derive payload key using nonce
-    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key, $nonce);
-
-    return Crypt::Age::Primitives->decrypt_payload($payload_key, $encrypted_payload);
+    return $output;
 }
 
 =method decrypt
@@ -192,6 +176,28 @@ if the MAC verification fails.
 
 =cut
 
+sub _encrypt_fh {
+    my ($class, $ifh, $ofh, $recipients) = @_;
+    binmode($ifh, ':raw') or croak "cannot binmode input filehandle: $!";
+    binmode($ofh, ':raw') or croak "cannot binmode output filehandle: $!";
+
+    croak "recipients must be an array ref" unless ref($recipients) eq 'ARRAY';
+    croak "at least one recipient required" unless @$recipients;
+
+    # Generate random file key
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+
+    # Create header with wrapped file key for each recipient
+    print {$ofh} Crypt::Age::Header->create($file_key, $recipients)->to_string;
+
+    # Generate payload nonce and derive payload key
+    my $nonce = Crypt::Age::Primitives->generate_payload_nonce;
+    print {$ofh} $nonce;
+
+    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key, $nonce);
+    return Crypt::Age::Primitives->encrypt_payload_fh($payload_key, $ifh, $ofh);
+}
+
 sub encrypt_file {
     my ($class, %args) = @_;
     my $input      = $args{input}      // croak "input required";
@@ -200,18 +206,13 @@ sub encrypt_file {
 
     open my $in_fh, '<:raw', $input
         or croak "Cannot open input file '$input': $!";
-    my $plaintext = do { local $/; <$in_fh> };
-    close $in_fh;
-
-    my $ciphertext = $class->encrypt(
-        plaintext  => $plaintext,
-        recipients => $recipients,
-    );
-
     open my $out_fh, '>:raw', $output
         or croak "Cannot open output file '$output': $!";
-    print $out_fh $ciphertext;
-    close $out_fh;
+
+    $class->_encrypt_fh($in_fh, $out_fh, $recipients);
+
+    close $out_fh or croak "Cannot close output file '$output': $!";
+    close $in_fh  or croak "Cannot close input file '$input': $!";
 
     return 1;
 }
@@ -245,6 +246,30 @@ Returns C<1> on success. Dies on error (file not found, permission denied, etc).
 
 =cut
 
+sub _decrypt_fh {
+    my ($class, $ifh, $ofh, $identities) = @_;
+    binmode($ifh, ':raw') or croak "cannot binmode input filehandle: $!";
+    binmode($ofh, ':raw') or croak "cannot binmode output filehandle: $!";
+
+    croak "identities must be an array ref" unless ref($identities) eq 'ARRAY';
+    croak "at least one identity required" unless @$identities;
+
+    # Parse header
+    my $header = Crypt::Age::Header->parse_from_fh($ifh);
+
+    # Unwrap file key using identities
+    my $file_key = $header->unwrap_file_key($identities);
+
+    # Extract nonce (first 16 bytes after header) and encrypted payload
+    my $nonce = Crypt::Age::Primitives->paranoid_read($ifh, 16);
+    croak 'end of file reached before getting nonce' if length($nonce) != 16;
+
+    # Derive payload key using nonce
+    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key, $nonce);
+
+    return Crypt::Age::Primitives->decrypt_payload_fh($payload_key, $ifh, $ofh);
+}
+
 sub decrypt_file {
     my ($class, %args) = @_;
     my $input      = $args{input}      // croak "input required";
@@ -253,18 +278,13 @@ sub decrypt_file {
 
     open my $in_fh, '<:raw', $input
         or croak "Cannot open input file '$input': $!";
-    my $ciphertext = do { local $/; <$in_fh> };
-    close $in_fh;
-
-    my $plaintext = $class->decrypt(
-        ciphertext => $ciphertext,
-        identities => $identities,
-    );
-
     open my $out_fh, '>:raw', $output
         or croak "Cannot open output file '$output': $!";
-    print $out_fh $plaintext;
-    close $out_fh;
+
+    $class->_decrypt_fh($in_fh, $out_fh, $identities);
+
+    close $out_fh or croak "Cannot close output file '$output': $!";
+    close $in_fh  or croak "Cannot close input file '$input': $!";
 
     return 1;
 }
