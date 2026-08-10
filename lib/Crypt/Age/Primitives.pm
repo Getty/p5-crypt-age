@@ -317,6 +317,19 @@ sub encrypt_payload_fh {
     return;
 }
 
+=method encrypt_payload_fh
+
+    my $ciphertext = Crypt::Age::Primitives->encrypt_payload_fh($payload_key, $ifh, $ofh);
+
+Encrypts the payload using ChaCha20-Poly1305 in chunked mode, using filehandles
+for both input and output.
+
+The plaintext is split into 64 KiB chunks. Each chunk is encrypted with a unique
+nonce derived from a counter and a final-chunk flag. Returns the concatenated
+encrypted chunks.
+
+=cut
+
 sub decrypt_payload {
     my ($class, $payload_key, $ciphertext) = @_;
 
@@ -369,6 +382,17 @@ sub decrypt_payload_fh {
 
     return;
 }
+
+=method decrypt_payload_fh
+
+    my $plaintext = Crypt::Age::Primitives->decrypt_payload_fh($payload_key, $ifh, $ofh);
+
+Decrypts a chunked payload encrypted with C<encrypt_payload>, using filehandles
+for both input and output.
+
+Dies if any chunk fails authentication.
+
+=cut
 
 sub _make_nonce {
     my ($class, $counter, $is_final) = @_;
