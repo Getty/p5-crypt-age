@@ -81,13 +81,14 @@ has _bytes => (
     is => 'lazy',
 );
 
-=attr bytes
-
-The header bytes up to and including the '---' before the MAC.
-
-Used to authenticate the header and verify that the correct file key was unwrapped.
-
-=cut
+# The header bytes the MAC is computed over: everything up to and including the
+# '---' of the footer line, without the space after it and without a trailing
+# newline. Internal, hence the leading underscore and the matching constructor
+# key used by parse_from_fh.
+#
+# On the read path parse_from_fh passes the literal bytes it read, so the MAC is
+# verified against what the file actually contained. On the write path there is
+# nothing to capture and the builder below re-serializes the stanzas instead.
 
 sub create {
     my ($class, $file_key, $recipients) = @_;
@@ -241,7 +242,7 @@ sub parse_from_fh {
 
     return $class->new(
         stanzas => \@stanzas,
-        bytes   => $bytes,
+        _bytes  => $bytes,
         mac     => $mac,
     );
 }
@@ -249,7 +250,7 @@ sub parse_from_fh {
 sub parse {
     my ($class, $data_ref, $offset_ref) = @_;
     open my $fh, '<:raw', $data_ref or croak "Invalid age input: cannot read";
-    seek($fh, $$offset_ref, 0);
+    seek($fh, $$offset_ref // 0, 0);
     my $retval = $class->parse_from_fh($fh);
     $$offset_ref = tell($fh);
     return $retval;

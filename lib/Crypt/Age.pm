@@ -260,7 +260,7 @@ sub encrypt_filehandle {
 
 =method encrypt_filehandle
 
-    Crypt::Age->encrypt_file(
+    Crypt::Age->encrypt_filehandle(
         input      => \*STDIN,
         output     => \*STDOUT,
         recipients => \@public_keys,
@@ -373,7 +373,7 @@ sub decrypt_filehandle {
 
 =method decrypt_filehandle
 
-    Crypt::Age->decrypt_file(
+    Crypt::Age->decrypt_filehandle(
         input      => \*STDIN,
         output     => \*STDOUT,
         identities => \@secret_keys,

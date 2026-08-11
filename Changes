@@ -1,6 +1,18 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Header MAC is now verified against the literal header bytes read from the
+    file instead of a re-serialization of the parsed stanzas. Files whose
+    stanza formatting differs from ours but is valid per the spec now verify
+    correctly; output is unchanged, the write path still serializes.
+  - Crypt::Age::Header->parse no longer warns "Use of uninitialized value in
+    seek" when the offset scalar it is handed is undef; it is treated as 0
+    again, as before the filehandle rewrite.
+  - Removed the unfinished Crypt::Age::Stanza::Scrypt, which was never usable
+    (it failed to compile) and had no public API. scrypt/passphrase recipients
+    remain unimplemented.
+  - Fixed the method names in the encrypt_filehandle/decrypt_filehandle POD
+    synopses, which showed encrypt_file/decrypt_file.
 
 0.001     2026-01-11 03:51:40Z
   - Initial release
