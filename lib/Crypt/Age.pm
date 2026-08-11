@@ -246,6 +246,50 @@ Returns C<1> on success. Dies on error (file not found, permission denied, etc).
 
 =cut
 
+sub encrypt_filehandle {
+    my ($class, %args) = @_;
+    my $in_fh      = $args{input}      // croak "input required";
+    my $out_fh     = $args{output}     // croak "output required";
+    my $recipients = $args{recipients} // croak "recipients required";
+
+    $class->_encrypt_fh($in_fh, $out_fh, $recipients);
+
+    return 1;
+
+}
+
+=method encrypt_filehandle
+
+    Crypt::Age->encrypt_file(
+        input      => \*STDIN,
+        output     => \*STDOUT,
+        recipients => \@public_keys,
+    );
+
+Encrypts for one or more recipients, based on filehandles for both input and
+output.
+
+Parameters:
+
+=over 4
+
+=item * C<input> - Input filehandle (required)
+
+=item * C<output> - Output filehandle (required)
+
+=item * C<recipients> - ArrayRef of Bech32-encoded public keys (required)
+
+=back
+
+Both filehandles will be forced to be C<:raw> using C<binmode>.
+
+The output stream will be in age format and can be decrypted with the C<age> or
+C<rage> command-line tools.
+
+Returns C<1> on success. Dies on error (file not found, permission denied, etc).
+
+=cut
+
 sub _decrypt_fh {
     my ($class, $ifh, $ofh, $identities) = @_;
     binmode($ifh, ':raw') or croak "cannot binmode input filehandle: $!";
@@ -313,6 +357,45 @@ Parameters:
 
 Returns C<1> on success. Dies if no matching identity is found, if the MAC
 verification fails, or on file I/O errors.
+
+=cut
+
+sub decrypt_filehandle {
+    my ($class, %args) = @_;
+    my $in_fh      = $args{input}      // croak "input required";
+    my $out_fh     = $args{output}     // croak "output required";
+    my $identities = $args{identities} // croak "identities required";
+
+    $class->_decrypt_fh($in_fh, $out_fh, $identities);
+
+    return 1;
+}
+
+=method decrypt_filehandle
+
+    Crypt::Age->decrypt_file(
+        input      => \*STDIN,
+        output     => \*STDOUT,
+        identities => \@secret_keys,
+    );
+
+Decrypts age-encrypted data from a filehandle using one or more identities.
+Output is sent to a filehandle too.
+
+Parameters:
+
+=over 4
+
+=item * C<input> - Encrypted input filehandle (required)
+
+=item * C<output> - Decrypted output filehandle (required)
+
+=item * C<identities> - ArrayRef of Bech32-encoded secret keys (required)
+
+=back
+
+Returns C<1> on success. Dies if no matching identity is found, if the MAC
+verification fails, or on I/O errors.
 
 =cut
 

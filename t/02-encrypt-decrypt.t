@@ -157,6 +157,53 @@ use Crypt::Age;
     is($decrypted, $plaintext, 'file roundtrip successful');
 }
 
+# Filehandle operations
+{
+    my ($public, $secret) = Crypt::Age->generate_keypair;
+    my $plaintext = "File content test\nWith newlines\n";
+
+    my ($in_fh, $in_file) = tempfile(UNLINK => 1);
+    print $in_fh $plaintext;
+    close $in_fh;
+
+    my $enc_data = '';
+    {
+        open my $in_fh, '<', $in_file or die "open($in_file): $!";
+        open my $out_fh, '>', \$enc_data or die "open() string for output: $!";
+        Crypt::Age->encrypt_filehandle(
+            input      => $in_fh,
+            output     => $out_fh,
+            recipients => [$public],
+        );
+    }
+    ok length($enc_data), 'encrypted data generated';
+
+    my $decrypted;
+    {
+        my ($enc_fh, $enc_file) = tempfile(UNLINK => 1);
+        print $enc_fh $enc_data;
+        close $enc_fh;
+        $enc_fh = undef;
+        open $enc_fh, '<', $enc_file or die "open($enc_file): $!";
+
+        my ($out_fh, $out_file) = tempfile(UNLINK => 1);
+        Crypt::Age->decrypt_filehandle(
+            input      => $enc_fh,
+            output     => $out_fh,
+            identities => [$secret],
+        );
+        close $out_fh;
+        close $enc_fh;
+
+        open my $fh, '<:raw', $out_file;
+        $decrypted = do { local $/; <$fh> };
+        close $fh;
+
+    }
+    is($decrypted, $plaintext, 'file roundtrip successful');
+
+}
+
 # Error handling
 {
     eval { Crypt::Age->encrypt(recipients => ['age1abc']) };
