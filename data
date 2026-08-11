@@ -1,0 +1,21 @@
+---
+class: standard
+completed: 2026-08-11T17:17:54Z
+created: 2026-08-11T15:46:40Z
+id: 6
+priority: medium
+started: 2026-08-11T17:17:54Z
+status: done
+tags:
+- spec
+- payload
+title: Empty payload decrypts to empty string instead of erroring
+updated: 2026-08-11T17:18:16Z
+---
+
+Spec: "Streaming decryption MUST signal an error if the end of file is reached without successfully decrypting a final chunk."
+
+Primitives::decrypt_payload loops `while ($remaining > 0)`, so a zero-byte payload produces no iterations and returns "" as a successful decryption. A file truncated to exactly the end of its header verifies as an empty plaintext.
+
+Truncation at any other point does fail correctly: the final-flag byte lands in the chunk nonce and the Poly1305 tag check catches it.
+Fixed by PR #3 (filehandle-first). decrypt_payload_fh now reads chunks via read/eof instead of substr arithmetic, so a payload-less file raises instead of returning the empty string. Regression test in t/02-encrypt-decrypt.t, verified red on a830d60.
