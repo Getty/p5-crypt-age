@@ -1,0 +1,17 @@
+---
+class: standard
+completed: 2026-08-19T18:30:09Z
+created: 2026-08-11T15:46:45Z
+id: 7
+priority: medium
+started: 2026-08-19T18:19:30Z
+status: done
+tags:
+- security
+title: verify_mac compares with eq, not constant time
+updated: 2026-08-19T18:30:09Z
+---
+
+Crypt::Age::Header::verify_mac does `$self->mac eq $expected_mac`. A MAC comparison should be constant time.
+Fixed in Header.pm: verify_mac now uses Crypt::Misc::slow_eq (CryptX XS wrapper around libtomcrypt mem_neq) instead of 'eq'. No new dependency -- CryptX is already required, and slow_eq (since CryptX 0.029) is below the floor Crypt::PK::X25519 already imposes, so cpanfile is unchanged. Return value is now a normalised 1/0; a wrong-length or absent MAC is still false and still non-fatal (and no longer warns). POD for verify_mac updated in the same edit. t/03-header.t gained a behaviour block: valid MAC accepted, single-byte flip at first and last position rejected, length 31/33/0 and undef rejected without dying. Stated plainly in the test comment that the accept/reject assertions alone would not catch a revert to 'eq'; the assertion that does is the no-warning check on an undef MAC, verified by temporarily reverting the implementation (test 39 failed, then passed again after restore). No timing measurement attempted. Verification: prove -lr t/ -- 00-load, 01-keys, 02-encrypt-decrypt, 03-header, 05-primitives pass; 04-interop SKIPPED (no age/rage binary on this machine), so interop is NOT proven; 06-stanza fails, but that is the in-flight parallel work on Stanza.pm/karr #4, untouched here. Owed and deliberately not written because of the file boundary for this task: a Changes bullet under {{$NEXT}}.
+Committed as 93fad42 on main. Crypt::Misc::slow_eq from CryptX, no new dependency. Return value is now 1/0, an undef MAC no longer warns. Test verified red against eq via the no-warning assertion.
