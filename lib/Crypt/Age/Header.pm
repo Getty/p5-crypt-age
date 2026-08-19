@@ -1,6 +1,6 @@
 package Crypt::Age::Header;
 # ABSTRACT: age file header parsing and generation
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 use Moo;
 use Carp qw(croak);
 use Crypt::Misc qw(slow_eq);
