@@ -1,6 +1,14 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - A malformed X25519 stanza is now rejected while the header is parsed, as
+    the format requires: one that does not carry exactly one argument after the
+    type, whose argument is not the canonical unpadded base64 encoding of a
+    32-byte value, or whose body is not exactly 32 bytes. These are header
+    failures and die from Crypt::Age::Header->parse. Previously an extra
+    argument was silently ignored, and a wrong-length body came back as "No
+    matching identity found". Stanzas of other recipient types are unaffected
+    and are still ignored rather than rejected.
   - Stanza serialization now emits the empty final line the format requires
     when a stanza body's base64 encoding is an exact multiple of 64
     characters. Files this distribution writes are byte-identical to before,

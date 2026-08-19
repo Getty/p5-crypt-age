@@ -215,4 +215,143 @@ use Crypt::Age::Stanza::X25519;
     ok($header->verify_mac($file_key), 'restored MAC verifies again');
 }
 
+# c2sp.org/age, X25519 recipient type: the identity implementation "MUST
+# otherwise reject any stanza that has more or less than two arguments, or
+# where the second argument is not a canonical base64 encoding of a 32-byte
+# value", and "MUST check that the body length is exactly 32 bytes before
+# attempting to decrypt it, to mitigate partitioning oracle attacks" (karr #5).
+# The spec counts the type itself as the first of those two arguments, so it is
+# exactly one argument after the type here.
+#
+# These are header failures, not "this identity does not match". The rejection
+# therefore has to land while the header is parsed, before any identity is
+# consulted -- otherwise a header carrying a malformed X25519 stanza could
+# still decrypt through some other stanza beside it, and whether it did would
+# depend on the order the stanzas happened to be tried in.
+#
+# Measured on HEAD before the fix: every one of the six cases below got past
+# Header::parse.
+#   two arguments  -> unwrap_file_key returned the correct file key. The extra
+#                     argument was ignored in silence.
+#   no argument    -> died inside CryptX with "FATAL: undefined key", after six
+#                     "Use of uninitialized value" warnings from the decoder.
+#   argument != 32 -> died inside CryptX with "FATAL: invalid key". Incidental:
+#                     that is import_key_raw's own length check, not ours, and
+#                     it says nothing about the age format.
+#   body != 32     -> croaked inside the eval in Stanza::X25519::unwrap, came
+#                     back as undef, and Header::unwrap_file_key reported "No
+#                     matching identity found" -- precisely the "no match" the
+#                     spec says a malformed stanza must not be turned into.
+{
+    my ($public, $secret) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+    my $good     = Crypt::Age::Stanza::X25519->wrap($file_key, $public);
+    my $good_arg = $good->args->[0];
+    my $good_body_b64 = Crypt::Age::Stanza::encode_base64_no_padding($good->body);
+
+    is(length($good->body), 32, 'fixture: a wrapped file key is 32 bytes');
+    is(length(Crypt::Age::Stanza::decode_base64_no_padding($good_arg)), 32,
+        'fixture: the ephemeral share is 32 bytes');
+
+    # A one-stanza header carrying a real MAC over its own bytes, so that a
+    # case which is NOT rejected runs all the way to an unwrapped file key. A
+    # placeholder MAC would make "accepted" indistinguishable from "accepted
+    # and then failed MAC verification".
+    my $build = sub {
+        my ($arg_line, $body_b64) = @_;
+        my $head_no_mac = join("\n",
+            'age-encryption.org/v1', $arg_line, $body_b64, '---');
+        my $mac = Crypt::Age::Primitives->compute_header_mac($file_key, $head_no_mac);
+        return $head_no_mac . ' '
+            . Crypt::Age::Stanza::encode_base64_no_padding($mac) . "\n";
+    };
+
+    my @rejected = (
+        ['no argument',
+            '-> X25519',
+            $good_body_b64],
+        ['two arguments',
+            "-> X25519 $good_arg $good_arg",
+            $good_body_b64],
+        ['an argument decoding to 31 bytes',
+            '-> X25519 ' . Crypt::Age::Stanza::encode_base64_no_padding("\x01" x 31),
+            $good_body_b64],
+        ['an argument decoding to 33 bytes',
+            '-> X25519 ' . Crypt::Age::Stanza::encode_base64_no_padding("\x01" x 33),
+            $good_body_b64],
+        ['a 31-byte body',
+            "-> X25519 $good_arg",
+            Crypt::Age::Stanza::encode_base64_no_padding("\x02" x 31)],
+        ['a 33-byte body',
+            "-> X25519 $good_arg",
+            Crypt::Age::Stanza::encode_base64_no_padding("\x02" x 33)],
+    );
+
+    for my $case (@rejected) {
+        my ($name, $arg_line, $body_b64) = @$case;
+
+        my $str = $build->($arg_line, $body_b64);
+        my $offset = 0;
+        my @warnings;
+        my $header = do {
+            local $SIG{__WARN__} = sub { push @warnings, @_ };
+            eval { Crypt::Age::Header->parse(\$str, \$offset) };
+        };
+        my $err = $@;
+
+        ok(!defined $header, "an X25519 stanza with $name is rejected at parse time");
+        like($err, qr/Invalid X25519 stanza/,
+            "rejecting $name names the age-format rule, not a CryptX internal");
+        is_deeply(\@warnings, [],
+            "rejecting $name emits no warnings");
+
+        # The argument and the body are key material -- an error must name the
+        # reason, never the value.
+        my (undef, undef, @arg_values) = split / /, $arg_line;
+        for my $value (@arg_values, $body_b64) {
+            unlike($err, qr/\Q$value\E/,
+                "rejecting $name does not quote the stanza contents back");
+        }
+    }
+
+    # Must keep working: a well-formed X25519 stanza.
+    {
+        my $str = $build->("-> X25519 $good_arg", $good_body_b64);
+        my $offset = 0;
+        my $header = eval { Crypt::Age::Header->parse(\$str, \$offset) };
+        is($@, '', 'a well-formed X25519 stanza still parses');
+        is($header->stanzas->[0]->type, 'X25519', 'and is built as an X25519 stanza');
+        is($header->unwrap_file_key([$secret]), $file_key,
+            'and still yields the file key');
+    }
+
+    # Must keep working: an unrecognized stanza type beside a valid X25519 one.
+    # "Implementations MUST ignore unrecognized stanzas" -- the validation above
+    # is scoped by class, not by inspecting every stanza in the header, and this
+    # grease stanza is shaped to break every single X25519 rule if it were:
+    # two arguments, neither of them a 32-byte value, and a 10-byte body.
+    {
+        my $grease_b64 = Crypt::Age::Stanza::encode_base64_no_padding("\x03" x 10);
+        my $head_no_mac = join("\n",
+            'age-encryption.org/v1',
+            $good->to_string,
+            '-> grease-test one two',
+            $grease_b64,
+            '---',
+        );
+        my $mac = Crypt::Age::Primitives->compute_header_mac($file_key, $head_no_mac);
+        my $str = $head_no_mac . ' '
+            . Crypt::Age::Stanza::encode_base64_no_padding($mac) . "\n";
+
+        my $offset = 0;
+        my $header = eval { Crypt::Age::Header->parse(\$str, \$offset) };
+        is($@, '', 'an unrecognized stanza type is not rejected');
+        is(scalar @{$header->stanzas}, 2, 'both stanzas parsed');
+        ok(!$header->stanzas->[1]->isa('Crypt::Age::Stanza::X25519'),
+            'the unrecognized stanza is not built as an X25519 stanza');
+        is($header->unwrap_file_key([$secret]), $file_key,
+            'the file key still unwraps from the X25519 stanza beside it');
+    }
+}
+
 done_testing;

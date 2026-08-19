@@ -276,7 +276,17 @@ Parameters:
 Returns a L<Crypt::Age::Header> object. The C<$offset> is updated to point to
 the start of the payload.
 
-Dies if the header format is invalid.
+Dies if the header format is invalid. That includes a malformed C<X25519>
+stanza: one that does not carry exactly one argument after the type, whose
+argument is not the canonical unpadded base64 encoding of a 32-byte value, or
+whose body is not exactly 32 bytes. Those are header failures and are raised
+here, before any identity is looked at, rather than being deferred to
+L</unwrap_file_key> and mistaken there for a stanza that simply does not match
+the identity. See L<Crypt::Age::Stanza::X25519/BUILD>.
+
+Stanzas of unrecognized types are kept as plain L<Crypt::Age::Stanza> objects
+and are not validated beyond the structure every stanza shares; the format
+requires them to be ignored, not rejected.
 
 =cut
 
@@ -341,9 +351,14 @@ Parameters:
 =back
 
 Tries each identity against each stanza until one successfully unwraps the file
-key and verifies the MAC. Returns the 16-byte file key.
+key and verifies the MAC. Returns the 16-byte file key. Stanzas of other types
+are skipped, so a file that mixes recipient types still decrypts.
 
-Dies if no matching identity is found or if MAC verification fails.
+Dies if no matching identity is found or if MAC verification fails. It does not
+die for a structurally invalid C<X25519> stanza -- L</parse> has already
+rejected the header by then -- but it does propagate the abort that a
+low-order-point ephemeral share triggers, since that is a header failure too and
+not a wrong identity.
 
 =cut
 
