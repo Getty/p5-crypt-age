@@ -1,0 +1,76 @@
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":1,"ts":"2026-08-11T15:46:15Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":2,"ts":"2026-08-11T15:46:20Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":3,"ts":"2026-08-11T15:46:25Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":4,"ts":"2026-08-11T15:46:31Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":5,"ts":"2026-08-11T15:46:35Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":6,"ts":"2026-08-11T15:46:40Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":7,"ts":"2026-08-11T15:46:45Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":8,"ts":"2026-08-11T15:46:50Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":9,"ts":"2026-08-11T16:19:10Z"}
+{"action":"handoff","agent":"crypt-age-worker","detail":"review","task_id":9,"ts":"2026-08-11T16:47:26Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":3,"ts":"2026-08-11T16:47:45Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":10,"ts":"2026-08-11T16:48:23Z"}
+{"action":"handoff","agent":"crypt-age-worker","detail":"review","task_id":10,"ts":"2026-08-11T16:49:03Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":6,"ts":"2026-08-11T17:17:54Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"done","task_id":6,"ts":"2026-08-11T17:18:16Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"review","task_id":9,"ts":"2026-08-19T18:19:03Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"done","task_id":9,"ts":"2026-08-19T18:19:08Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"review","task_id":10,"ts":"2026-08-19T18:19:12Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"done","task_id":10,"ts":"2026-08-19T18:19:16Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"in-progress","task_id":1,"ts":"2026-08-19T18:19:21Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"in-progress","task_id":8,"ts":"2026-08-19T18:19:25Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"in-progress","task_id":7,"ts":"2026-08-19T18:19:30Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"in-progress","task_id":3,"ts":"2026-08-19T18:19:34Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"in-progress","task_id":4,"ts":"2026-08-19T18:19:39Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":2,"ts":"2026-08-19T18:22:24Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":7,"ts":"2026-08-19T18:24:17Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":1,"ts":"2026-08-19T18:25:18Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":11,"ts":"2026-08-19T18:25:18Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":3,"ts":"2026-08-19T18:25:24Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":8,"ts":"2026-08-19T18:25:31Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":4,"ts":"2026-08-19T18:25:37Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"in-progress","task_id":5,"ts":"2026-08-19T18:28:53Z"}
+{"action":"move","agent":"crypt-age-test-writer","detail":"in-progress","task_id":2,"ts":"2026-08-19T18:28:58Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":1,"ts":"2026-08-19T18:29:33Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":1,"ts":"2026-08-19T18:29:37Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":1,"ts":"2026-08-19T18:29:42Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":8,"ts":"2026-08-19T18:29:46Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":8,"ts":"2026-08-19T18:29:50Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":8,"ts":"2026-08-19T18:29:55Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":7,"ts":"2026-08-19T18:29:59Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":7,"ts":"2026-08-19T18:30:04Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":7,"ts":"2026-08-19T18:30:10Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":3,"ts":"2026-08-19T18:30:14Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":3,"ts":"2026-08-19T18:30:19Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":3,"ts":"2026-08-19T18:30:23Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":4,"ts":"2026-08-19T18:30:28Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":4,"ts":"2026-08-19T18:30:32Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":4,"ts":"2026-08-19T18:30:37Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":5,"ts":"2026-08-19T18:38:23Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":5,"ts":"2026-08-19T18:40:40Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":5,"ts":"2026-08-19T18:40:44Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":5,"ts":"2026-08-19T18:40:48Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":12,"ts":"2026-08-19T18:40:52Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":13,"ts":"2026-08-19T18:40:56Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":12,"ts":"2026-08-19T18:41:47Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":12,"ts":"2026-08-19T18:41:52Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":14,"ts":"2026-08-19T18:52:14Z"}
+{"action":"move","agent":"crypt-age-doc-writer","detail":"in-progress","task_id":13,"ts":"2026-08-19T18:52:29Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":15,"ts":"2026-08-19T18:52:35Z"}
+{"action":"edit","agent":"crypt-age-test-writer","detail":"in-progress","task_id":2,"ts":"2026-08-19T18:52:57Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":11,"ts":"2026-08-19T18:53:51Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"in-progress","task_id":15,"ts":"2026-08-19T18:55:14Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":11,"ts":"2026-08-19T18:57:43Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":11,"ts":"2026-08-19T18:57:47Z"}
+{"action":"edit","agent":"crypt-age-doc-writer","detail":"in-progress","task_id":13,"ts":"2026-08-19T18:58:00Z"}
+{"action":"edit","agent":"crypt-age-doc-writer","detail":"in-progress","task_id":13,"ts":"2026-08-19T18:58:45Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":13,"ts":"2026-08-19T18:58:50Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":13,"ts":"2026-08-19T18:58:54Z"}
+{"action":"move","agent":"crypt-age-worker","detail":"in-progress","task_id":14,"ts":"2026-08-19T18:58:58Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":14,"ts":"2026-08-19T19:04:41Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":14,"ts":"2026-08-19T19:06:18Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":14,"ts":"2026-08-19T19:06:23Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":14,"ts":"2026-08-19T19:06:27Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":15,"ts":"2026-08-19T19:07:39Z"}
+{"action":"edit","agent":"crypt-age-worker","detail":"in-progress","task_id":15,"ts":"2026-08-19T19:10:11Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":15,"ts":"2026-08-19T19:10:16Z"}
