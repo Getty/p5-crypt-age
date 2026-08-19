@@ -1,0 +1,25 @@
+---
+class: standard
+completed: 2026-08-19T18:30:23Z
+created: 2026-08-11T15:46:25Z
+id: 3
+priority: medium
+started: 2026-08-19T18:19:34Z
+status: done
+tags:
+- spec
+- wire
+title: Stanza body of exactly 64*n base64 chars emits no final line
+updated: 2026-08-19T18:30:23Z
+---
+
+ABNF: stanza = arg-line *full-line final-line, with final-line = *63base64char LF. An empty final line is REQUIRED when the body ends flush at 64 columns.
+
+Crypt::Age::Stanza::to_string uses `while (length($body_b64) > 64)`, so a 64-char body produces one 64-char line and stops — no empty final line. Verified: a 48-byte body (64 b64 chars) emits 2 lines, a 96-byte body (128 chars) emits 3, in both cases with no trailing empty line.
+
+Unreachable today (an X25519 body is 32 bytes -> 43 chars) and immediately reachable for any recipient type with a 48/96-byte body, i.e. as soon as a second stanza type is added.
+
+Header::parse handles the read side correctly (`last if length($body_line) < 64`). The writer is the broken half. A Perl round trip cannot catch this — assert on literal bytes.
+Second consequence, now that Header captures the literal header bytes at parse time (branch integrate-filehandle): to_string on a PARSED header no longer reproduces the bytes the MAC was computed over. Measured on a hand-built header carrying a 48-byte-body stanza (64 base64 chars + the required empty final line): captured 204 bytes, to_string re-emits 203, and the re-emitted header fails its own MAC. Previously both sides used the re-serialization, so the output was at least self-consistent. Nothing in the distribution calls to_string on a parsed header, and the divergence disappears once this ticket is fixed - noting it so the two are fixed together.
+Fixed in lib/Crypt/Age/Stanza.pm: to_string's wrap loop is now 'while (length($body_b64) >= 64)', so a body whose base64 encoding is an exact multiple of 64 emits the empty final line the ABNF requires. Old-vs-new comparison over body lengths 0..200: output differs for exactly 48/96/144/192 raw bytes (64/128/192/256 base64 chars) and is byte-identical for the other 197, including the 32-byte X25519 body this distribution actually writes. The second consequence recorded above is gone with it: on a hand-built header with a 48-byte-body stanza, the re-serialization now matches the captured bytes byte-for-byte (was one short) and verifies its own MAC. Regression test t/06-stanza.t asserts literal bytes (a Perl round trip cannot catch this), plus the parsed-vs-re-serialized length and MAC. Verified red before the fix. prove -lr t/ passes (144 tests); t/04-interop.t SKIPPED - no age/rage binary on this machine, so wire compatibility is NOT proven here. POD for to_string updated. Not committed; Changes entry not written (task restricted edits to Stanza.pm and t/06-stanza.t) - text handed to the delegating agent.
+Committed as 4237e07 on main. to_string loops on >= 64; old-vs-new sweep over body lengths 0..200 differs at exactly 48/96/144/192 bytes and is byte-identical elsewhere, so nothing we currently write moved. The re-serialization divergence noted above is gone with it. Interop NOT proven - no age binary on the machine.
