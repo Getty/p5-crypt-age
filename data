@@ -1,0 +1,37 @@
+---
+class: standard
+completed: 2026-08-19T19:06:27Z
+created: 2026-08-19T18:52:14Z
+id: 14
+priority: medium
+started: 2026-08-19T18:58:58Z
+status: done
+tags:
+- spec
+- testkit
+- header
+title: Stanza argument character set is not validated (accepts non-VCHAR bytes)
+updated: 2026-08-19T19:06:27Z
+---
+
+Found by the age test kit vector stanza_invalid_character (t/07-testkit.t), expect: header failure, currently: success.
+
+The vector's own X25519 stanza matches its given identity fine, but the file also carries a second stanza of an unrecognized type ('stanza') whose single argument contains a non-ASCII byte (the UTF-8 encoding of "è"). Header::parse_from_fh's stanza start-line regex
+
+    m{\A ->\x{20} (\S+ (?:\x{20}\S+)*) \x{0a} \z}mxs
+
+accepts any non-whitespace byte via \S, so this stanza is built as a plain Crypt::Age::Stanza (unrecognized type, correctly ignored per spec) instead of the header being rejected outright. Per c2sp.org/age's stanza-line ABNF, arguments are restricted to a printable-ASCII (VCHAR) character set; a character outside that set makes the *whole header* invalid, independent of whether the stanza's type happens to be recognized.
+
+This is distinct from karr #5 (closed): #5 validates X25519-typed stanza arguments specifically (arg count, base64-canonical 32 bytes). This gap is upstream of that — a general stanza-argument character-set check that must apply to every stanza line Header::parse_from_fh reads, recognized type or not, before dispatching on type.
+
+Reference: t/07-testkit.t's header comment ("KNOWN, NAMED FAILURES") and t/testkit/vectors/stanza_invalid_character.
+Fixed in lib/Crypt/Age/Header.pm: parse_from_fh's stanza start-line regex now spells the argument character set as the ABNF does -- [\x21-\x7e] (RFC 5234 VCHAR) instead of \S -- for the type token and every argument alike, before the type dispatch. arg-line = "-> " argument *(SP argument) LF / argument = 1*VCHAR, c2sp.org/age "ABNF definition of file header"; the grammar has no separate rule for the type, so the type is simply the first argument and shares the set. A byte outside it is a header failure regardless of stanza type, including for unrecognized types that would otherwise be ignored.
+
+Also dropped the offending line's contents from that croak's message (it interpolated the whole line) -- the message now names the rule only. Stanza arguments are key material. This is a user-visible error-text change and owes a Changes entry, which I could not write: the task scoped me to Header.pm and t/03-header.t only. Suggested bullet: "Reject age headers whose stanza arguments contain characters outside printable ASCII (0x21-0x7e), as the format's ABNF requires; the error no longer quotes the offending line back."
+
+POD: added the new reason to the =method parse_from_fh failure catalogue and made the unrecognized-type paragraph state that the shared structure includes the character set.
+
+Tests: four new rejection cases in t/03-header.t (non-ASCII byte in an unknown type's argument -- the vector's exact shape; 0x01; 0x7f; non-ASCII in the type itself), each asserting the error names neither the value nor a warning; plus the counter-test sweeping all 94 bytes 0x21-0x7e across type and argument tokens and still unwrapping the file key from the X25519 stanza beside it, and the empty-argument case pinned as still-rejected. 8 of those assertions were verified red against HEAD's Header.pm (run with -I against an isolated copy, so the parallel karr #15 worker's tree was untouched).
+
+Verification: prove -l t/07-testkit.t 9 failures before -> 8 after; stanza_invalid_character green, run/skip counts unchanged at 68/75; all 8 hmac_* (the MAC-footer branch is a separate regex and untouched), all 14 stanza_* and x25519_grease green. The remaining 8 stream_* failures are karr #15, unchanged. prove -lr t/: everything green except t/05-primitives.t, whose 7 failures are the parallel worker's new red tests -- HEAD's t/05-primitives.t passes against my patched lib. t/04-interop.t SKIPPED (no age/rage on this machine): nothing is claimed about interop.
+Committed. VCHAR class [\x21-\x7e] replaces \S in the stanza start-line regex of parse_from_fh, before the type dispatch, since the character set is a header-grammar property rather than a recipient-type one. Also removed the raw line from the croak, which would otherwise have started leaking stanza arguments. Testkit 9 -> 8 failures; stanza_valid_characters (every byte 0x21-0x7e) stays green.
