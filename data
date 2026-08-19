@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-08-19T18:57:47Z
+created: 2026-08-19T18:25:18Z
+id: 11
+priority: medium
+started: 2026-08-19T18:57:47Z
+status: done
+tags:
+- packaging
+- cpanfile
+title: cpanfile pins no CryptX version
+updated: 2026-08-19T18:57:47Z
+---
+
+cpanfile has a bare `requires 'CryptX';` with no minimum version, but the distribution uses features that landed in specific CryptX releases:
+
+- Crypt::PK::X25519 - CryptX 0.067
+- Crypt::Misc::slow_eq - CryptX 0.029 (added by ticket #7)
+
+On an older CryptX the distribution installs cleanly and then dies at runtime with a missing module or missing symbol, which is exactly the failure mode a version floor exists to prevent.
+
+Fix: pin `requires 'CryptX' => '0.067';` (the highest of the actually required floors), or higher if a later release turns out to be needed. Verify the floor against the CryptX Changes file rather than guessing, and state which feature dictates it.
+
+Found while reviewing ticket #7. Not a blocker for it - the installed CryptX here is 0.091.
+Floor verified against the CryptX Changes file, not guessed: Crypt::PK::X25519 is 'new' in CryptX 0.067 (2020-02-01). Crypt::Misc arrived much earlier in 0.029, and slow_eq is present in the 0.067 tarball (lib/Crypt/Misc.pm:178), so X25519 is the binding constraint and the pin is 'CryptX' => '0.067'. Holding the edit until the testkit agent is done, since it may add a test-phase entry to the same file.
+Committed. cpanfile pins CryptX 0.067, verified through to META.json via dzil build. Floor read from the CryptX Changes file: Crypt::PK::X25519 is new in 0.067; slow_eq is already present there, so X25519 is the binding constraint.
