@@ -354,4 +354,135 @@ use Crypt::Age::Stanza::X25519;
     }
 }
 
+# c2sp.org/age, "ABNF definition of file header" (karr #14):
+#
+#     arg-line = "-> " argument *(SP argument) LF
+#     argument = 1*VCHAR
+#
+# VCHAR is RFC 5234's %x21-7E. There is no separate rule for the stanza type
+# -- the type is the first argument and carries the same character set. The
+# test kit's stanza_valid_characters vector sweeps the whole 0x21-0x7e range
+# across type and argument tokens and expects success; stanza_invalid_character
+# puts the two UTF-8 bytes of "e-grave" in the argument of an unrecognized
+# "stanza" type and expects a header failure.
+#
+# That pairing is the whole point of this block, and it is why the check
+# cannot live in a stanza class: the character set belongs to the header's
+# grammar, not to a recipient type. A byte outside it invalidates the WHOLE
+# header even though the stanza carrying it is of an unknown type that the
+# format would otherwise require us to ignore. The rejection therefore has to
+# happen before the type dispatch.
+#
+# Measured on HEAD before the fix: the start-line regex spelled the argument
+# character set as \S+, which admits every non-whitespace byte. All four
+# rejection cases below parsed cleanly, the offending stanza was built as a
+# plain Crypt::Age::Stanza, ignored as an unknown type, and unwrap_file_key
+# then returned the correct file key from the valid X25519 stanza beside it --
+# i.e. the header was not merely parsed but fully accepted.
+{
+    my ($public, $secret) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+    my $x25519   = Crypt::Age::Stanza::X25519->wrap($file_key, $public);
+    my $grease_b64 = Crypt::Age::Stanza::encode_base64_no_padding("\x03" x 10);
+
+    # A header carrying a real MAC over its own literal bytes, so that a case
+    # which is NOT rejected runs all the way through to an unwrapped file key.
+    # With a placeholder MAC "accepted" would be indistinguishable from
+    # "accepted, then failed MAC verification".
+    my $build = sub {
+        my ($grease_arg_line) = @_;
+        my $head_no_mac = join("\n",
+            'age-encryption.org/v1',
+            $x25519->to_string,
+            $grease_arg_line,
+            $grease_b64,
+            '---',
+        );
+        my $mac = Crypt::Age::Primitives->compute_header_mac($file_key, $head_no_mac);
+        return $head_no_mac . ' '
+            . Crypt::Age::Stanza::encode_base64_no_padding($mac) . "\n";
+    };
+
+    my @rejected = (
+        # Exactly the stanza_invalid_character vector's shape: unrecognized
+        # type, non-ASCII byte in the argument.
+        ['a non-ASCII byte in an unrecognized stanza type\'s argument',
+            "-> stanza \xc3\xa8"],
+        # 0x7f (DEL) sits one past the top of VCHAR, 0x01 well below it.
+        ['a control character (0x01) in an argument',
+            "-> grease-test one\x01two"],
+        ['a DEL byte (0x7f) in an argument',
+            "-> grease-test one\x7ftwo"],
+        # The type is just the first argument, so it is restricted too.
+        ['a non-ASCII byte in the stanza type itself',
+            "-> gr\xc3\xa8ase one"],
+    );
+
+    for my $case (@rejected) {
+        my ($name, $grease_arg_line) = @$case;
+
+        my $str = $build->($grease_arg_line);
+        my $offset = 0;
+        my @warnings;
+        my $header = do {
+            local $SIG{__WARN__} = sub { push @warnings, @_ };
+            eval { Crypt::Age::Header->parse(\$str, \$offset) };
+        };
+        my $err = $@;
+
+        ok(!defined $header, "$name is rejected at parse time");
+        like($err, qr/Invalid age stanza #2 start line/,
+            "rejecting $name names the offending stanza and the format rule");
+        is_deeply(\@warnings, [], "rejecting $name emits no warnings");
+
+        # Stanza arguments are key material -- an error names the reason,
+        # never the value.
+        unlike($err, qr/\Q$grease_arg_line\E/,
+            "rejecting $name does not quote the stanza line back");
+    }
+
+    # The counter-test, and the reason the check above must not be broader
+    # than the ABNF: the full printable-ASCII battery, laid out the way
+    # stanza_valid_characters does it -- every byte from 0x21 to 0x7e, split
+    # into space-separated argument tokens, the first of which is the type.
+    # If the character set is tightened past VCHAR this is what goes red.
+    {
+        my @chars = map { chr } 0x21 .. 0x7e;
+        is(scalar @chars, 94, 'fixture: 94 printable ASCII characters');
+
+        my @tokens;
+        push @tokens, join('', splice(@chars, 0, 8)) while @chars;
+        my $grease_arg_line = '-> ' . join(' ', @tokens);
+        is(length(join('', @tokens)), 94,
+            'fixture: every printable ASCII byte appears in the arg line');
+
+        my $str = $build->($grease_arg_line);
+        my $offset = 0;
+        my $header = eval { Crypt::Age::Header->parse(\$str, \$offset) };
+
+        is($@, '', 'a stanza using the full printable-ASCII set is accepted');
+        is(scalar @{$header->stanzas}, 2, 'both stanzas parsed');
+        is($header->stanzas->[1]->type, $tokens[0],
+            'the type is the first argument, punctuation and all');
+        is_deeply($header->stanzas->[1]->args, [@tokens[1 .. $#tokens]],
+            'the remaining arguments survive verbatim');
+        ok(!$header->stanzas->[1]->isa('Crypt::Age::Stanza::X25519'),
+            'the unrecognized stanza is not built as an X25519 stanza');
+        is($header->unwrap_file_key([$secret]), $file_key,
+            'and the file key still unwraps from the X25519 stanza beside it');
+    }
+
+    # An empty argument is not an argument: argument = 1*VCHAR. This already
+    # held before the fix (\S+ cannot match nothing either) and must keep
+    # holding -- the test kit's stanza_empty_argument vector depends on it.
+    {
+        my $str = $build->('-> stanza  argument');
+        my $offset = 0;
+        my $header = eval { Crypt::Age::Header->parse(\$str, \$offset) };
+        ok(!defined $header, 'an empty stanza argument is still rejected');
+        like($@, qr/Invalid age stanza #2 start line/,
+            'and reports it as a bad stanza start line');
+    }
+}
+
 done_testing;

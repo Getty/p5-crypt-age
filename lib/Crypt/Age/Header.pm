@@ -202,8 +202,29 @@ sub parse_from_fh {
             last;
         }
         ++$n;
-        my ($ta) = m{\A ->\x{20} (\S+ (?:\x{20}\S+)*) \x{0a} \z}mxs
-            or croak "Invalid age stanza #$n start line: <$_>";
+        # c2sp.org/age, "ABNF definition of file header":
+        #
+        #     arg-line = "-> " argument *(SP argument) LF
+        #     argument = 1*VCHAR
+        #
+        # VCHAR is RFC 5234's core rule %x21-7E, the printable ASCII
+        # characters, so every argument is one or more of those and an empty
+        # argument (two spaces in a row, or a trailing space) is not an
+        # argument at all. The ABNF has no separate rule for the stanza type:
+        # the type is simply the first argument and carries exactly the same
+        # character set.
+        #
+        # This is why the check lives here rather than in a stanza class. The
+        # character set is a property of the header's grammar, not of any one
+        # recipient type, so a byte outside it makes the WHOLE header invalid
+        # -- including in a stanza whose type we do not recognize and would
+        # otherwise be required to ignore. Hence: validate before the type
+        # dispatch below. (\S used to stand in for VCHAR here and let every
+        # non-whitespace byte through, which is what the test kit's
+        # stanza_invalid_character vector caught.)
+        my ($ta) = m{\A ->\x{20} ([\x21-\x7e]+ (?:\x{20}[\x21-\x7e]+)*) \x{0a} \z}mxs
+            or croak "Invalid age stanza #$n start line: expected '-> ' followed"
+                . " by space-separated arguments of printable ASCII (0x21-0x7e)";
 
         $bytes .= $_;
 
@@ -302,6 +323,15 @@ missing
 line (C<-E<gt> type arg1 arg2 ...>) or the C<---> MAC footer (three dashes, a
 space, and a 43-character base64 MAC), before a valid MAC line has been found
 
+=item * a stanza start line carries an argument that is empty (two spaces in
+a row, or a trailing space) or that contains a byte outside printable ASCII,
+C<0x21>-C<0x7e> -- the format's C<argument = 1*VCHAR>, where C<VCHAR> is RFC
+5234's core rule. The first argument, the stanza type, is subject to the same
+set: the grammar defines no separate rule for it. This check applies to every
+stanza line in the header regardless of type, and rejecting is deliberate --
+a byte outside the set invalidates the whole header rather than merely making
+that one stanza ignorable
+
 =item * a stanza body, a stanza argument, or the MAC token fails the strict
 decoding in L<Crypt::Age::Stanza/decode_base64_no_padding> -- C<=> padding, a
 character outside the base64 alphabet, an impossible length, or a
@@ -317,7 +347,11 @@ not exactly 32 bytes
 A stanza of an unrecognized type is kept as a plain L<Crypt::Age::Stanza> and
 is not validated beyond the structure every stanza shares -- the format
 requires unknown stanzas to be ignored, not rejected, since this is how
-recipient types are expected to be added in the future (grease).
+recipient types are expected to be added in the future (grease). "The
+structure every stanza shares" does include the argument character set above:
+an unknown-type stanza whose arguments are all printable ASCII is ignored,
+one carrying a byte outside that set is a header failure, because the byte
+breaks the header's grammar rather than that one stanza's semantics.
 
 This is the implementation L</parse> wraps for its C<\$data>/C<\$offset>
 interface; see L</parse> for that entry point.
