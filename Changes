@@ -1,6 +1,14 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Stanza serialization now emits the empty final line the format requires
+    when a stanza body's base64 encoding is an exact multiple of 64
+    characters. Files this distribution writes are byte-identical to before,
+    since an X25519 body never reaches that boundary.
+  - Unpadded base64 in headers is now decoded strictly: padding characters,
+    characters outside the base64 alphabet, impossible lengths and
+    non-canonical encodings are rejected rather than repaired, as the format
+    requires. Malformed age files that previously decoded now die.
   - Crypt::Age::Header->verify_mac now compares the header MAC with
     Crypt::Misc::slow_eq instead of a plain string eq, so a wrong MAC is no
     longer rejected at the first differing byte. It returns 1 or 0 instead of
