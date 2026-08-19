@@ -1,0 +1,21 @@
+---
+class: standard
+completed: 2026-08-19T18:58:54Z
+created: 2026-08-19T18:40:56Z
+id: 13
+priority: low
+started: 2026-08-19T18:52:29Z
+status: done
+tags:
+- pod
+title: Header::parse_from_fh has no POD
+updated: 2026-08-19T18:58:54Z
+---
+
+Crypt::Age::Header::parse_from_fh is a public method with no =method block, while every other public method in the module has one. It came in with the filehandle-first rewrite (PR #3) and is the entry point Header::parse delegates to, so a caller working with filehandles has nothing to read.
+
+Should document: what it consumes from the handle, that the handle is left positioned at the first payload byte, that it captures the literal header bytes for the MAC, and which malformed inputs it dies on (now including the X25519 stanza rules from karr #5).
+
+Found while reviewing karr #5. Doc-only, no behaviour change - crypt-age-doc-writer.
+Added =method parse_from_fh to lib/Crypt/Age/Header.pm: what it consumes (version line, stanzas, MAC footer), that it leaves the handle at the first payload byte (so parse can tell() it), that it captures literal header bytes for verify_mac to authenticate against (not a re-serialization — verified via _bytes/_build__bytes/verify_mac), the full death catalog (bad version line, bad stanza start line, body line >64 chars, body missing its terminating short line, missing/malformed MAC footer, decode_base64_no_padding's strict rejections, and X25519::BUILD's argument/length checks from karr #5), and that unknown-type stanzas are kept unvalidated as plain Stanza objects (grease). Added a one-sentence reciprocal link in the existing =method parse block pointing to parse_from_fh; no other prose touched. Verified: podchecker on the raw source (17 pre-existing-style errors, all =method/=attr-unknown-directive and L</...>-unresolved-link noise identical in kind to what the file already had before my change — confirmed by diffing podchecker output against git HEAD's copy); podchecker clean on the dzil-built/Pod::Weaver-woven copy (0 errors); eyeballed the rendered prose via Pod::Text. prove -lr t/00-load.t t/01-keys.t t/02-encrypt-decrypt.t t/03-header.t t/05-primitives.t t/06-stanza.t: all pass (183/183). Did not run t/07-testkit.t/t/testkit/ as authoritative — that's the parallel agent's in-progress work (untracked files) with 9 documented known-failing vectors unrelated to this change. No age/rage binary on this machine, t/04-interop.t skips — no interop claim made. Doc-only, no code touched.
+Committed. =method parse_from_fh added, plus one sentence in =method parse pointing at it. Verified on the woven output (dzil build then podchecker), since podchecker on the source cannot resolve the house =method/=attr directives.
