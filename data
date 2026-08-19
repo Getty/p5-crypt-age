@@ -1,0 +1,33 @@
+---
+class: standard
+completed: 2026-08-19T18:29:42Z
+created: 2026-08-11T15:46:15Z
+id: 1
+priority: high
+started: 2026-08-19T18:19:21Z
+status: done
+tags:
+- security
+- spec
+- x25519
+title: Reject all-zero X25519 shared secret
+updated: 2026-08-19T18:29:42Z
+---
+
+The spec (c2sp.org/age, X25519 recipient type) requires: "If the shared secret is all 0x00 bytes, the identity implementation MUST abort." This is the low-order-point check.
+
+Crypt::Age::Primitives::x25519_shared_secret returns the all-zero secret without complaint — verified: passing a 32-byte all-zero peer key yields a 32-byte all-zero shared secret from CryptX, and Stanza::X25519::unwrap goes on to derive a wrap key from it.
+
+Fix: abort in x25519_shared_secret (or in Stanza::X25519 before derive_wrap_key) when the secret is all zero. Add a unit test that constructs the low-order case directly.
+Fixed in lib/Crypt/Age/Primitives.pm: x25519_shared_secret now croaks "X25519 shared secret is all zero: peer key is a low-order point" when the computed secret contains no non-zero byte. Comparison is not constant time on purpose (the peer key is public); the message carries no key or secret material. POD updated with the abort behaviour.
+
+Correction to this ticket's premise, measured here: with CryptX 0.091 an all-zero (or any low-order) peer key does NOT yield an all-zero secret -- libtomcrypt refuses it inside shared_secret() with "Invalid input packet". Skill crypt-age-core states CryptX returns the zero secret happily; that is not true for 0.091 and should be corrected there. The check is still required: the spec puts the duty on us, the cpanfile pins no minimum CryptX version, and an older CryptX has no such check.
+
+Not swallowed downstream: the eval in Stanza::X25519::unwrap only wraps unwrap_file_key, so the abort propagates on the decrypt path instead of degrading to "wrong identity".
+
+Tests: new t/05-primitives.t. The regression case stubs Crypt::PK::X25519::shared_secret to hand back the all-zero secret an older CryptX would return, then asserts the abort -- red on HEAD (tests 4,5,6 fail), green with the fix. Also asserts the error leaks neither key nor secret bytes, plus a defense-in-depth case with a real all-zero peer key (passes both before and after here, labelled as such in the file).
+
+Verified: prove -lr t/ -> 7 files pass, 144 tests. t/04-interop.t SKIPPED (no age/rage binary on this machine) -- interop is NOT proven for this change.
+
+Changes entry still owed (user-visible: decrypt now aborts on a low-order ephemeral share); not written because this task was scoped to Primitives.pm + t/05-primitives.t only.
+Committed as eb143d9 on main. croak in x25519_shared_secret when the secret is all zero; regression test in t/05-primitives.t stubs the CryptX backend, verified red against HEAD. Corrected premise: CryptX 0.091 already refuses low-order peer keys inside shared_secret(), so this is a backstop for older CryptX - see #11.
