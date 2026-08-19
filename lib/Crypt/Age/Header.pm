@@ -248,6 +248,82 @@ sub parse_from_fh {
     );
 }
 
+=method parse_from_fh
+
+    my $header = Crypt::Age::Header->parse_from_fh($fh);
+
+Parses an age header directly from a filehandle.
+
+Parameters:
+
+=over 4
+
+=item * C<$fh> - An open, readable filehandle positioned at the first byte of
+the header
+
+=back
+
+Puts the handle into C<:raw> mode and reads it line by line (with C<"\n"> as
+the input record separator) for the duration of the call, so the caller does
+not need to prepare the handle's discipline beforehand. It reads the version
+line, every recipient stanza, and the C<---> MAC footer line, stopping as soon
+as that footer line has been consumed. On return the handle is therefore
+positioned at the first byte of the payload -- this is what lets L</parse>
+call C<tell> on it afterwards to report the new offset.
+
+While reading, it accumulates the literal header bytes it consumed -- the
+version line, every stanza line exactly as read, and the C<---> of the footer,
+with no trailing space, MAC value, or newline -- and stores them on the
+returned object. L</verify_mac> authenticates against these captured bytes,
+not against a re-serialization of the parsed stanzas, so a header this method
+accepted is exactly the header the MAC is checked against. (Header
+construction on the write path, L</create>, has no bytes to capture and
+re-serializes the stanzas instead.)
+
+Returns a L<Crypt::Age::Header> object holding the parsed stanzas, the raw MAC
+bytes, and the captured header bytes. It does not verify the MAC itself -- that
+is L</verify_mac>'s job, and it only runs after a file key has been unwrapped
+from one of the stanzas.
+
+Dies if:
+
+=over 4
+
+=item * the first line is not the literal C<age-encryption.org/v1> version
+line
+
+=item * a stanza body line is longer than 64 characters
+
+=item * a stanza body never reaches a line shorter than 64 characters before
+the handle runs out -- the required short (possibly empty) final line is
+missing
+
+=item * the handle runs out, or a line fails to match either a stanza start
+line (C<-E<gt> type arg1 arg2 ...>) or the C<---> MAC footer (three dashes, a
+space, and a 43-character base64 MAC), before a valid MAC line has been found
+
+=item * a stanza body, a stanza argument, or the MAC token fails the strict
+decoding in L<Crypt::Age::Stanza/decode_base64_no_padding> -- C<=> padding, a
+character outside the base64 alphabet, an impossible length, or a
+non-canonical encoding
+
+=item * an C<X25519> stanza fails the checks in
+L<Crypt::Age::Stanza::X25519/BUILD>: other than exactly one argument after the
+type, an argument that does not decode to a 32-byte value, or a body that is
+not exactly 32 bytes
+
+=back
+
+A stanza of an unrecognized type is kept as a plain L<Crypt::Age::Stanza> and
+is not validated beyond the structure every stanza shares -- the format
+requires unknown stanzas to be ignored, not rejected, since this is how
+recipient types are expected to be added in the future (grease).
+
+This is the implementation L</parse> wraps for its C<\$data>/C<\$offset>
+interface; see L</parse> for that entry point.
+
+=cut
+
 sub parse {
     my ($class, $data_ref, $offset_ref) = @_;
     open my $fh, '<:raw', $data_ref or croak "Invalid age input: cannot read";
@@ -261,7 +337,9 @@ sub parse {
 
     my $header = Crypt::Age::Header->parse(\$data, \$offset);
 
-Parses an age header from encrypted data.
+Parses an age header from encrypted data. This is a C<\$data>/C<\$offset>
+wrapper: it opens a filehandle on C<\$data> and delegates the actual parsing
+to L</parse_from_fh>.
 
 Parameters:
 
