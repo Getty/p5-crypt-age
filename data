@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-08-11T16:47:26Z
+claimed_by: crypt-age-worker
+class: standard
+completed: 2026-08-19T18:19:08Z
+created: 2026-08-11T16:19:10Z
+id: 9
+priority: high
+started: 2026-08-11T16:47:26Z
+status: done
+tags:
+- pr3
+- scrypt
+title: 'Remove WIP Scrypt.pm merged from PR #3'
+updated: 2026-08-19T18:19:08Z
+---
+
+lib/Crypt/Age/Stanza/Scrypt.pm came in with PR #3 without being mentioned in its description. It does not compile: it imports scrypt_pbkdf from Crypt::KeyDerivation, which exports only pbkdf1, pbkdf2, hkdf, hkdf_expand, hkdf_extract. Behind that, sub unwrap references an undeclared $class, the POD is copy-pasted from X25519, and the work factor constants are marked "just a guess".
+
+No test loads it, so the suite stays green, but dzil copies it into blib and it would ship in the CPAN tarball.
+
+Remove it from the branch. A real scrypt recipient is separate work and needs its own spec pass (the scrypt stanza MUST be the only stanza in the header).
+Removed via git rm on branch integrate-filehandle. Confirmed no test, no cpanfile entry and no other module referenced it; Crypt::PRNG and Crypt::KeyDerivation stay required by Primitives. dzil build no longer copies it into the tarball (verified: built dist contains only Age.pm, Header.pm, Keys.pm, Primitives.pm, Stanza.pm, Stanza/X25519.pm). Change is in the working tree, not yet committed.
+Verified in main: lib/Crypt/Age/Stanza/Scrypt.pm is gone, shipped with commit ac7c959/116444e.
