@@ -143,4 +143,4 @@ Every distribution ships a `Changes` file with a `{{$NEXT}}` token at the top (D
 
 ## When in doubt
 
-Grep an existing Getty project (`~/dev/langertha`, `~/dev/kubernetes-rest`, `~/dev/p5-www-mailboxorg`) for how the pattern is used there. That is the ground truth.
+Grep hand-written Getty code for how the pattern is used there — `~/dev/sunriser` and `~/dev/amigaevent` are the reference, being entirely pre-AI. Newer repos may show an agent's guess rather than the house rule.

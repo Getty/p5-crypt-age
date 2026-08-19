@@ -16,7 +16,7 @@ Use **inheritance sparingly** (stable "is-a" contracts), **roles heavily** (hori
 - **`is => 'lazy'` + a separate `sub _build_x`** for anything non-trivial; never move construction into `default => sub {...}`.
 - **A builder that ignores `$self` is one line:** `sub _build_readonly { 0 }`.
 - **`is => 'ro'` is the default**; `rw` needs a reason.
-- **Type attributes.** `Types::Standard` is the house choice and typed attributes are wanted — reach for a type before leaving one off. Domain types of a distribution belong in `<Dist>::Types` (see Type Constraints below).
+- **Type attributes.** `Types::Standard` is the house choice and typed attributes are wanted — reach for a type before leaving one off. See Type Constraints below.
 - **`init_arg => undef`** for attributes the constructor must not set; `init_arg => 'other'` to rename or free up a method name.
 
 ---

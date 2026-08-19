@@ -1,6 +1,6 @@
 ---
 name: crypt-age-core
-description: "Load before editing Crypt::Age — the pure-Perl age implementation: header layout and MAC re-serialization, X25519 stanzas, Bech32 keys, STREAM chunking, the known spec gaps."
+description: "Load before editing Crypt::Age — the pure-Perl age implementation: header layout and the read/write split in what the MAC covers, X25519 stanzas, Bech32 keys, STREAM chunking, and the upstream test kit that stands in for a missing age binary."
 ---
 
 # Crypt::Age — core
@@ -54,74 +54,59 @@ age-encryption.org/v1\n          <- version line
 
 ## The invariant that decides whether interop holds
 
-**The header MAC is computed over a *re-serialization*, not over the bytes that were
-read.** `Header::parse` builds `Stanza` objects and `verify_mac` then calls
-`_header_bytes_for_mac`, which runs every stanza back through `Stanza::to_string`.
+**Read and write use different sources for the MAC input, and that asymmetry is
+deliberate.** `parse_from_fh` captures the literal header bytes as it reads them and
+stores them on the object; `verify_mac` MACs *those*. `create` has no bytes to capture,
+so its lazy builder re-serializes the stanzas through `Stanza::to_string`.
 
-The consequence, and it is the single most important thing to know about this
-distribution:
+That split fixed the old failure mode — a header written by `age`, valid per the spec
+but formatted differently from ours, used to fail its own MAC here — but it does not
+demote `Stanza::to_string` to formatting:
 
-> Any change to how a stanza is formatted — argument spacing, the 64-column wrap, the
-> base64 encoding, the order of stanzas — is a **wire change**. It will make files
-> written by `age` fail their own MAC here, even though nothing about the crypto moved.
+> Any change to how a stanza is serialized — argument spacing, the 64-column wrap, the
+> base64 encoding, the order of stanzas — is still a **wire change** on the write side.
+> It decides the bytes `age` has to accept and the MAC we compute over our own header.
 
-So a "cosmetic" edit in `Stanza::to_string` is never cosmetic. Round-tripping Perl→Perl
-will keep passing, because our writer and our reader change together. Only the real
-binary catches it. This is why `t/04-interop.t` is the only test that means anything
-for this layer.
+So a "cosmetic" edit in `Stanza::to_string` is never cosmetic. Round-tripping
+Perl→Perl keeps passing, because our writer and our reader change together. What
+catches it is the real binary — or, on a machine without one, the test kit's
+`success` vectors, which were written by the reference implementation.
 
-A parse-time capture of the literal header bytes would remove the coupling, and that is
-a real design option — but it is a change with consequences, so make it deliberately and
-write it down, don't slide into it while fixing something else.
+## Known spec gaps — all closed, 2026-08-19
 
-## Known spec gaps — measured, not speculated
+Every gap this section used to list is fixed and has a regression test. Do not
+"discover" them again, and do not reintroduce one by reverting a check that looks
+over-strict — each is dictated by `c2sp.org/age`:
 
-These are all verified against `age` 1.1.1 and the C2SP spec text. They are open work,
-not accepted behaviour. Do not "discover" them again — check the karr board first, and
-if you fix one, close its ticket.
+| Was | Now | Commit |
+|---|---|---|
+| all-zero X25519 shared secret accepted | `x25519_shared_secret` croaks (low-order point check) | `eb143d9` |
+| stanza body flush at 64 columns emitted no final line | `to_string` loops on `>= 64` | `4237e07` |
+| base64 decoder repaired padding and non-canonical input | `decode_base64_no_padding` rejects both, plus bad alphabet and impossible length | `4237e07` |
+| X25519 stanza arguments unvalidated | `Stanza::X25519::BUILD` checks arg count, 32-byte argument, 32-byte body — at parse time, so a malformed stanza is a header failure, not a soft "no match" | `fa48954` |
+| empty payload decrypted to `""` | `decrypt_payload_fh` raises | PR #3 |
+| `verify_mac` used `eq` | `Crypt::Misc::slow_eq` | `93fad42` |
+| `_make_nonce` computed its nonce twice | dead line removed | `eb143d9` |
+| stanza arguments accepted any non-whitespace byte | `[\x21-\x7e]` per `argument = 1*VCHAR` — checked before the type dispatch, so it applies to stanzas of unknown type too | `9ef9ce6` |
+| STREAM finality decided by `eof()` | a chunk is final because it authenticates under the final-flag nonce; data after the final chunk is rejected | `bf0550e` |
 
-1. **The all-zero shared secret is not rejected.** The spec: *"If the shared secret is
-   all 0x00 bytes, the identity implementation MUST abort."* `Primitives::x25519_shared_secret`
-   returns it happily — verified: a 32-byte all-zero peer key yields a 32-byte all-zero
-   secret from CryptX, and `Stanza::X25519::unwrap` proceeds to derive a wrap key from
-   it. This is the low-order-point check; its absence is a security defect, not a
-   cosmetic gap.
+The last two were found by the test kit on the day it was wired in, not by review —
+which is the argument for running it.
 
-2. **A stanza body that is an exact multiple of 64 base64 characters emits no final
-   line.** The ABNF is `stanza = arg-line *full-line final-line` with
-   `final-line = *63base64char LF` — an empty final line is *required* when the body
-   ends flush at 64 columns. `Stanza::to_string` uses `while (length($body_b64) > 64)`,
-   so a 64-char body produces one 64-char line and stops. Unreachable today (an X25519
-   body is 32 bytes → 43 chars) and immediately reachable for any recipient type with a
-   48/96-byte body. `Header::parse`'s `last if length($body_line) < 64` is the matching
-   half and reads it correctly — the writer is the broken side.
+Two things worth carrying forward:
 
-3. **The base64 decoder accepts what the spec says it MUST reject.**
-   `decode_base64_no_padding` adds padding back before decoding, so padded and
-   non-canonical encodings are accepted. The spec: *"decoders MUST reject non-canonical
-   encodings and encodings ending with `=` padding characters."*
+- **A partial release is part of the contract.** `decrypt_payload_fh` streams, so
+  plaintext already written stays in the output handle when it dies. Each released
+  chunk is individually authentic; the *message* is not, and that is exactly what the
+  error reports. Do not "fix" this by buffering — the test kit asserts on the partial
+  release (`stream_no_final_full` expects 64 KiB out, then the error).
+- **CryptX ≥ 0.067 refuses low-order peer keys inside `shared_secret()` itself.** Our
+  own check is a backstop, and the reason `t/05-primitives.t` stubs the backend to
+  reach it. The cpanfile pins that floor.
 
-4. **Stanza arguments are not validated.** The spec requires rejecting an X25519 stanza
-   with other than exactly two arguments, or whose second argument is not a canonical
-   base64 encoding of a 32-byte value. `Header::parse` splits on whitespace and hands
-   whatever it finds to `unwrap`.
-
-5. **An empty payload decrypts to the empty string instead of erroring.**
-   `decrypt_payload`'s `while ($remaining > 0)` never runs for a zero-byte payload, so a
-   truncated file that lost its whole payload verifies as an empty plaintext. The spec:
-   *"Streaming decryption MUST signal an error if the end of file is reached without
-   successfully decrypting a final chunk."* (Truncation at any *other* point does fail
-   correctly — the final-flag byte lands in the nonce and the tag check catches it.)
-
-6. **`verify_mac` compares with `eq`**, not in constant time.
-
-7. **`_make_nonce` computes its nonce twice.** The first `pack('x3 N N', …)` is
-   overwritten on the next line and is dead. The surviving code is correct; the corpse
-   is confusing.
-
-Also absent by design so far, not defects: scrypt / passphrase recipients, the ssh and
-`mlkem768x25519` / tagged types, ASCII armor, and streaming (both `encrypt_file` and
-`decrypt_file` slurp the whole file into memory).
+Still absent by design, not defects: scrypt / passphrase recipients, the ssh and
+`mlkem768x25519` / tagged types, ASCII armor, and streaming for the top-level
+`encrypt_file` / `decrypt_file`, which still slurp.
 
 ## Keys
 
@@ -137,18 +122,24 @@ all-lower only.
 ## Proof — a green suite is not one
 
 ```bash
-prove -lr t/                    # unit tests; note -r, plain -l t/ is not recursive
-prove -lv t/04-interop.t        # the only compatibility proof
+prove -lr t/                    # everything; note -r, plain -l t/ is not recursive
+prove -lv t/07-testkit.t        # the 143 upstream vectors — runs without a binary
+prove -lv t/04-interop.t        # the real binary, when there is one
 ```
 
-`t/04-interop.t` resolves the CLI with `which age` and falls back to `which rage`, then
-`plan skip_all` if neither exists. Without a binary the suite reports *All tests
-successful* having skipped every compatibility assertion. **Always say which of the two
-you ran**, and treat "interop skipped" as an unverified change, not a passing one.
+**There is no `age` or `rage` on this machine.** `t/04-interop.t` resolves the CLI with
+`which age`, falls back to `which rage`, and `plan skip_all`s when neither exists — so
+it asserts nothing here, and a green suite is not evidence for a format-touching change
+on its own. Say which of the three you ran.
 
-`age` 1.1.1 is on PATH on this machine. The upstream test kit at
-<https://age-encryption.org/testkit> is not wired into the suite yet — it is the
-authoritative vector set and a real gap.
+`t/07-testkit.t` is what fills that hole: the C2SP/CCTV vectors, vendored under
+`t/testkit/`, 68 of 143 runnable against this implementation and 75 skipped with a
+printed per-reason tally (armor, scrypt, hybrid — none implemented). They were produced
+by the reference implementation, so they prove the read side against real bytes. They
+cannot prove the write side end to end: there is no reproducible way to inject our
+randomness, so nothing here shows that `age` accepts what we emit. Only the binary does
+that.
 
-Never weaken an assertion to make a test pass. Keys, identities and plaintext never
-appear in errors, diagnostics, commit messages or ticket bodies.
+Never weaken an assertion to make a test pass, and never edit a vector or the runner's
+expectations to get to green — a test kit you adjust proves nothing. Keys, identities
+and plaintext never appear in errors, diagnostics, commit messages or ticket bodies.

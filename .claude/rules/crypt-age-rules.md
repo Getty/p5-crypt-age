@@ -53,27 +53,32 @@ chunking. `README.md` and `Changes` wording are not.
 ## Interop is the product — a green suite is not a proof
 
 This distribution's entire claim is that `age` and `rage` can read what it writes.
-`t/04-interop.t` is the only test that checks it, and it `plan skip_all`s when neither
-binary is on PATH. Without one the suite reports `All tests successful` having asserted
-nothing about compatibility.
+`t/04-interop.t` is the only test that checks that direction, and it `plan skip_all`s
+when neither binary is on PATH — which is the case on this machine. `t/07-testkit.t`
+runs the 143 upstream vectors without a binary and covers the read side against bytes
+the reference implementation produced; it cannot cover the write side, because there is
+no reproducible way to inject our randomness.
 
 Never report a green suite as evidence for a format-touching change. State which ran:
 
 ```bash
 prove -lr t/               # unit only; -r matters, plain -l t/ is not recursive
-prove -lv t/04-interop.t   # the actual proof (age 1.1.1 is on PATH here)
+prove -lv t/07-testkit.t   # 143 upstream vectors; no binary needed
+prove -lv t/04-interop.t   # the real binary — NOT installed on this machine, skips
 ```
 
 Self-consistency is the failure mode, not the safety net: this library decrypting its
 own output proves nothing about what `age` will accept.
 
-## The header MAC rides on re-serialization
+## Stanza serialization is crypto, not formatting
 
-`Header::verify_mac` re-runs the parsed stanzas through `Stanza::to_string` and MACs
-*that*, not the bytes it read. So a change to stanza formatting — spacing, the 64-column
-wrap, the base64 — is a wire change that will reject files written by `age`, while every
-Perl→Perl test stays green. Treat `Stanza::to_string` as crypto, not as formatting.
-Details and the full constant table: skill `crypt-age-core`.
+`parse_from_fh` captures the literal header bytes and `verify_mac` MACs those, so a
+header written by `age` no longer has to match our formatting to verify. The write path
+still MACs a re-serialization through `Stanza::to_string`, so a change to stanza
+formatting — spacing, the 64-column wrap, the base64 — is still a wire change: it
+decides the bytes `age` has to accept. Every Perl→Perl test stays green through it,
+because our writer and reader move together. Details and the full constant table: skill
+`crypt-age-core`.
 
 ## Cryptographic code — no drive-by changes
 

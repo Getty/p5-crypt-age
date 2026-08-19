@@ -10,8 +10,8 @@ Released to CPAN as `Crypt-Age`. Built and released with `Dist::Zilla` via
 ## Specification
 
 - Format spec: <https://github.com/C2SP/C2SP/blob/main/age.md> (`c2sp.org/age`)
-- Test vectors: <https://age-encryption.org/testkit> (authoritative; not wired into the
-  suite yet)
+- Test vectors: <https://age-encryption.org/testkit> (authoritative; vendored under
+  `t/testkit/` and run by `t/07-testkit.t`)
 
 The spec is normative and short. Read the relevant section before changing any constant
 — every size, label and offset in this distribution is dictated by it.
@@ -19,7 +19,9 @@ The spec is normative and short. Read the relevant section before changing any c
 ## Status
 
 X25519 recipients are implemented end to end: keypair generation, header creation and
-parsing, the header MAC, and the STREAM-chunked payload. Verified against `age` 1.1.1.
+parsing, the header MAC, and the STREAM-chunked payload. Verified against `age` 1.1.1
+on a machine that had it, and on every push against the 143 upstream test vectors —
+68 of which exercise this implementation, the rest covering features it does not have.
 
 Not implemented: scrypt/passphrase recipients, SSH recipients, the post-quantum and
 tagged recipient types, ASCII armor, and streaming I/O (`encrypt_file` / `decrypt_file`
@@ -34,13 +36,14 @@ live in skill `crypt-age-core` — they are not repeated here.
 dzil build          # build the distribution
 dzil test           # recursive test run
 dzil clean          # clean build artifacts
-prove -lr t/        # unit tests — note -r, plain `prove -l t/` is not recursive
-prove -lv t/04-interop.t   # the only compatibility proof; skips without an age binary
+prove -lr t/        # everything — note -r, plain `prove -l t/` is not recursive
+prove -lv t/07-testkit.t   # 143 upstream vectors; needs no age binary
+prove -lv t/04-interop.t   # the real binary; skips without one
 ```
 
-`t/04-interop.t` calls `plan skip_all` when neither `age` nor `rage` is on PATH, and the
-suite then reports success having asserted nothing about compatibility. Always say which
-of the two runs you did.
+`t/04-interop.t` calls `plan skip_all` when neither `age` nor `rage` is on PATH, and
+then asserts nothing about compatibility. `t/07-testkit.t` needs no binary and prints
+what it ran and what it skipped. Always say which of the runs you did.
 
 ## Delegation
 
