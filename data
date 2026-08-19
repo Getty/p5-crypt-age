@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-08-11T16:49:03Z
+claimed_by: crypt-age-worker
+class: standard
+completed: 2026-08-19T18:19:16Z
+created: 2026-08-11T16:48:23Z
+id: 10
+priority: high
+started: 2026-08-11T16:49:03Z
+status: done
+tags:
+- pr3
+- header
+- mac
+title: Header MAC verifies against the literal parsed bytes
+updated: 2026-08-19T18:19:16Z
+---
+
+PR #3 added a _bytes attribute meant to hold the header bytes read from the file, but parse_from_fh passed the constructor key "bytes" while Moo init_arg was "_bytes", so the value was silently dropped and verify_mac fell back to the lazy builder, i.e. to the re-serialization of the parsed stanzas. Measured before the fix: 0 builder calls after parse, 1 after MAC verify.
+
+Fixed by passing _bytes => $bytes, matching the attribute name. Read path now MACs what the file actually contained; write path is untouched and still serializes via the builder.
+
+Deliberate wire change - the option skill crypt-age-core describes as "a parse-time capture of the literal header bytes would remove the coupling". Verified with age 1.1.1: both directions at 0/1/65535/65536/65537/131072 bytes with 1 and 3 recipients, and a hand-built spec-legal header that age accepts, the old code rejected and the new code accepts.
+
+In the working tree of branch integrate-filehandle, not yet committed.
+Implemented on branch integrate-filehandle; diff awaiting maintainer review before commit. Regression tests for the literal-bytes capture are not written yet - that is test-writer work.
+Verified in main: Header::parse_from_fh passes _bytes => $bytes (Header.pm:245), verify_mac reads $self->_bytes (Header.pm:285). Regression tests present in t/ from commit 4e11ded.
