@@ -1,6 +1,11 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Crypt::Age::Header->verify_mac now compares the header MAC with
+    Crypt::Misc::slow_eq instead of a plain string eq, so a wrong MAC is no
+    longer rejected at the first differing byte. It returns 1 or 0 instead of
+    1 or the empty string; a MAC of the wrong length, or none at all, is still
+    false, no longer warns, and is never fatal.
   - X25519 key exchange now aborts when the shared secret is all zero, as
     c2sp.org/age requires. This is the low-order point check: it affects
     decryption of a file carrying a low-order ephemeral share and encryption

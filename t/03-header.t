@@ -164,4 +164,55 @@ use Crypt::Age::Stanza::X25519;
     is($offset, length($str), 'offset lands at the end of the crafted header');
 }
 
+# verify_mac must not compare the MAC byte-by-byte with an early return on the
+# first mismatch (karr #7). Timing is not measurable in a test suite and
+# nothing below tries, so be clear about what this can and cannot show: the
+# accept/reject assertions hold for a plain string eq too and would not catch a
+# revert. They pin the contract around the comparison -- a MAC that differs in
+# exactly one byte is rejected whether that byte is the first or the last, and
+# a MAC of the wrong length or none at all is rejected without dying.
+#
+# The one assertion with teeth is the warning check: eq on an undef MAC emits
+# "Use of uninitialized value", slow_eq does not.
+{
+    my ($public) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+
+    my $header = Crypt::Age::Header->create($file_key, [$public]);
+    my $good   = $header->mac;
+
+    is(length($good), 32, 'fixture: MAC is 32 bytes');
+    ok($header->verify_mac($file_key), 'valid MAC verifies');
+
+    for my $pos (0, 31) {
+        my $tampered = $good;
+        substr($tampered, $pos, 1) = chr(ord(substr($good, $pos, 1)) ^ 0x01);
+        $header->mac($tampered);
+        my $ok = eval { $header->verify_mac($file_key) };
+        is($@, '', "MAC differing only in byte $pos does not die");
+        ok(!$ok, "MAC differing only in byte $pos is rejected");
+    }
+
+    for my $bad (substr($good, 0, 31), $good . "\x00", '') {
+        $header->mac($bad);
+        my $len = length($bad);
+        my $ok = eval { $header->verify_mac($file_key) };
+        is($@, '', "MAC of length $len does not die");
+        ok(!$ok, "MAC of length $len is rejected");
+    }
+
+    $header->mac(undef);
+    my @warnings;
+    my $ok = do {
+        local $SIG{__WARN__} = sub { push @warnings, @_ };
+        eval { $header->verify_mac($file_key) };
+    };
+    is($@, '', 'missing MAC does not die');
+    ok(!$ok, 'missing MAC is rejected');
+    is_deeply(\@warnings, [], 'missing MAC is rejected without warning');
+
+    $header->mac($good);
+    ok($header->verify_mac($file_key), 'restored MAC verifies again');
+}
+
 done_testing;

@@ -3,6 +3,7 @@ package Crypt::Age::Header;
 our $VERSION = '0.002';
 use Moo;
 use Carp qw(croak);
+use Crypt::Misc qw(slow_eq);
 use Crypt::Age::Primitives;
 use Crypt::Age::Stanza;
 use Crypt::Age::Stanza::X25519;
@@ -285,7 +286,12 @@ sub verify_mac {
     my $header_bytes = $self->_bytes;
     my $expected_mac = Crypt::Age::Primitives->compute_header_mac($file_key, $header_bytes);
 
-    return $self->mac eq $expected_mac;
+    # slow_eq is CryptX's XS wrapper around libtomcrypt's mem_neq: for two
+    # equal-length strings it reads both in full instead of returning at the
+    # first differing byte. It does not hide the length -- a length mismatch is
+    # reported as unequal, which is fine here since the MAC length is fixed by
+    # the format and not secret. undef compares as unequal rather than dying.
+    return slow_eq($self->mac, $expected_mac) ? 1 : 0;
 }
 
 =method verify_mac
@@ -294,8 +300,12 @@ sub verify_mac {
 
 Verifies that the header MAC is correct for the given file key.
 
-Returns true if the MAC is valid, false otherwise. Used to confirm that the
+Returns C<1> if the MAC is valid, C<0> otherwise. Used to confirm that the
 correct file key was unwrapped from a stanza.
+
+The comparison goes through C<slow_eq> from L<Crypt::Misc>, so a wrong MAC is
+not rejected at the first differing byte. A MAC of the wrong length -- or no
+MAC at all -- returns C<0>; it is never fatal.
 
 =cut
 
