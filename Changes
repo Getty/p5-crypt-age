@@ -1,6 +1,10 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - cpanfile now pins CryptX to 0.067, the release that introduced
+    Crypt::PK::X25519. It previously required CryptX with no minimum at all,
+    so an older one satisfied the declared prerequisites and then failed at
+    runtime.
   - A malformed X25519 stanza is now rejected while the header is parsed, as
     the format requires: one that does not carry exactly one argument after the
     type, whose argument is not the canonical unpadded base64 encoding of a
