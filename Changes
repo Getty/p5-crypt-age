@@ -1,6 +1,13 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - The distribution now carries the upstream age test kit: 143 vectors from
+    C2SP/CCTV, run by t/07-testkit.t. 68 of them exercise this implementation
+    and pass; the remaining 75 are skipped with a stated reason, since they
+    test ASCII armor and the scrypt and post-quantum recipient types, none of
+    which are implemented. Unlike t/04-interop.t this needs no age binary on
+    PATH, so a machine without one is no longer a machine without a
+    compatibility proof.
   - STREAM payload decryption no longer decides a chunk's finality from
     end-of-file. A chunk is final because it authenticates under the
     final-flag nonce, and any data after the final chunk now invalidates the
