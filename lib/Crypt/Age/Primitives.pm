@@ -120,7 +120,18 @@ sub x25519_shared_secret {
     my $their_pk = Crypt::PK::X25519->new;
     $their_pk->import_key_raw($their_public, 'public');
 
-    return $our_pk->shared_secret($their_pk);
+    my $shared_secret = $our_pk->shared_secret($their_pk);
+
+    # c2sp.org/age, X25519 recipient type: "If the shared secret is all 0x00
+    # bytes, the identity implementation MUST abort." That is the low-order
+    # point check. The peer key is public, so this comparison does not need to
+    # be constant time. Recent CryptX/libtomcrypt rejects such peer keys inside
+    # shared_secret() with its own error, but the cpanfile pins no minimum
+    # CryptX version and the spec puts the duty on us, so we check regardless.
+    croak "X25519 shared secret is all zero: peer key is a low-order point"
+        if $shared_secret !~ /[^\x00]/;
+
+    return $shared_secret;
 }
 
 =method x25519_shared_secret
@@ -130,6 +141,17 @@ sub x25519_shared_secret {
 Performs X25519 key exchange to compute a shared secret.
 
 Parameters are raw 32-byte keys. Returns a 32-byte shared secret.
+
+Dies if the shared secret is all C<0x00> bytes, which the age specification
+requires ("If the shared secret is all 0x00 bytes, the identity implementation
+MUST abort"). Such a secret means the peer key is a low-order point: on the
+decrypt path an attacker-supplied ephemeral share, on the encrypt path a
+recipient key that would yield a wrapping key known to everyone. The error
+message carries no key or secret material.
+
+Note that this is a backstop: a sufficiently recent L<CryptX> refuses the same
+peer keys one layer down and dies with its own message before this check is
+reached.
 
 =cut
 
@@ -398,10 +420,7 @@ sub _make_nonce {
     my ($class, $counter, $is_final) = @_;
 
     # 11 bytes counter (big-endian) + 1 byte final flag
-    my $nonce = pack('x3 N N', ($counter >> 32) & 0xFFFFFFFF, $counter & 0xFFFFFFFF);
-    # Actually, the nonce is: 11-byte big-endian counter || 1-byte last-block flag
-    # Let's be more precise:
-    $nonce = "\x00" x 3;  # First 3 bytes zero
+    my $nonce = "\x00" x 3;  # First 3 bytes zero
     $nonce .= pack('N', ($counter >> 32) & 0xFFFFFFFF);  # Next 4 bytes
     $nonce .= pack('N', $counter & 0xFFFFFFFF);          # Next 4 bytes
     $nonce .= pack('C', $is_final ? 1 : 0);              # Last byte: final flag

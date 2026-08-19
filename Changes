@@ -1,6 +1,11 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - X25519 key exchange now aborts when the shared secret is all zero, as
+    c2sp.org/age requires. This is the low-order point check: it affects
+    decryption of a file carrying a low-order ephemeral share and encryption
+    to a low-order recipient key, both of which would otherwise proceed with a
+    wrapping key an attacker can predict.
   - Header MAC is now verified against the literal header bytes read from the
     file instead of a re-serialization of the parsed stanzas. Files whose
     stanza formatting differs from ours but is valid per the spec now verify
