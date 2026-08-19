@@ -6,9 +6,9 @@ allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
     - crypt-age-core
-    - perl-core
-    - perl-moo
-    - karr
+    - getty-perl-core
+    - getty-perl-moo
+    - kanban-issues-karr-cli
 ---
 
 You are the crypt-age-worker for **Crypt::Age**, the pure-Perl implementation of the

@@ -95,7 +95,7 @@ don't invoke the skill first, just use it. Board state lives in `refs/karr/*`.
 - `karr move ID in-progress --claim NAME` — start · `karr handoff ID --claim NAME --note "…"` — to review
 
 Serialize board mutations when fanning out: keep implementation parallel, then loop the
-`karr move`/`handoff`/`sync` calls sequentially. Full command surface: skill `karr`.
+`karr move`/`handoff`/`sync` calls sequentially. Full command surface: skill `kanban-issues-karr-cli`.
 
 ## Release — never without permission
 
@@ -118,6 +118,6 @@ handle a specific issue.
 ## Perl specifics — reference, don't restate
 
 Module loading, Moo patterns, cpanfile pinning for Getty-authored dependencies, POD
-conventions and house style live in skills `perl-core`, `perl-moo` and
-`perl-release-author-getty` (force-loaded for `crypt-age-*` agents). The age wire format
+conventions and house style live in skills `getty-perl-core`, `getty-perl-moo` and
+`getty-perl-release-author-getty` (force-loaded for `crypt-age-*` agents). The age wire format
 and its invariants live in skill `crypt-age-core`. Do not duplicate them here.

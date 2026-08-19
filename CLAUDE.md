@@ -56,7 +56,7 @@ principle and the lane boundaries are in `.claude/rules/crypt-age-rules.md`.
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live under `.claude/skills/` —
-`perl-core`, `perl-moo`, `perl-release-author-getty` and `perl-release-dist-ini` are
+`getty-perl-core`, `getty-perl-moo`, `getty-perl-release-author-getty` and `perl-release-dist-ini` are
 hardlinked from `~/dev/perl/shared-skills/`; `crypt-age-core` is owned by this repo.
 
 Work is coordinated on the repo's `karr` board (`karr board`).

@@ -5,11 +5,11 @@ model: sonnet
 allowed-tools: Read, Bash, Glob, Grep
 briefing:
   skills:
-    - perl-release-author-getty
+    - getty-perl-release-author-getty
     - perl-release-dist-ini
-    - perl-core
+    - getty-perl-core
     - crypt-age-core
-    - karr
+    - kanban-issues-karr-cli
 ---
 
 You are the crypt-age-release-checker for **Crypt::Age**. Conventions from the skills

@@ -6,8 +6,8 @@ allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
     - crypt-age-core
-    - perl-core
-    - karr
+    - getty-perl-core
+    - kanban-issues-karr-cli
 ---
 
 You are the crypt-age-test-writer.

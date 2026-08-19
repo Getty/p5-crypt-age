@@ -1,6 +1,6 @@
 ---
 name: crypt-age-core
-description: "Architecture and wire-format invariants of Crypt::Age — the pure-Perl age (age-encryption.org/v1) implementation. Header layout and the MAC's dependency on re-serialization, X25519 stanza wrapping, Bech32 key encoding, STREAM payload chunking, the known spec gaps, and why the suite can be green while the only compatibility test never ran."
+description: "Load before editing Crypt::Age — the pure-Perl age implementation: header layout and MAC re-serialization, X25519 stanzas, Bech32 keys, STREAM chunking, the known spec gaps."
 ---
 
 # Crypt::Age — core
