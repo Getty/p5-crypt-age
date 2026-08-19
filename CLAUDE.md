@@ -19,13 +19,14 @@ The spec is normative and short. Read the relevant section before changing any c
 ## Status
 
 X25519 recipients are implemented end to end: keypair generation, header creation and
-parsing, the header MAC, and the STREAM-chunked payload. Verified against `age` 1.1.1
-on a machine that had it, and on every push against the 143 upstream test vectors —
-68 of which exercise this implementation, the rest covering features it does not have.
+parsing, the header MAC, and the STREAM-chunked payload. Verified in both directions
+against `age` 1.2.1 and `rage` 0.12.1, and on every push against the 143 upstream test
+vectors — 68 of which exercise this implementation, the rest covering features it does
+not have.
 
 Not implemented: scrypt/passphrase recipients, SSH recipients, the post-quantum and
-tagged recipient types, ASCII armor, and streaming I/O (`encrypt_file` / `decrypt_file`
-read the whole file into memory).
+tagged recipient types, and ASCII armor. The file and filehandle API does stream;
+only the string API `encrypt` / `decrypt` holds the whole message in memory.
 
 The architecture, the full wire-constant table and the measured deviations from the spec
 live in skill `crypt-age-core` — they are not repeated here.

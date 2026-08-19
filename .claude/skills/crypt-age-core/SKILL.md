@@ -17,8 +17,8 @@ the spec disagree, the spec wins and this file is the bug.
 
 | Module | Owns |
 |---|---|
-| `Crypt::Age` | public API — `generate_keypair`, `encrypt`/`decrypt`, `encrypt_file`/`decrypt_file`. Class methods, never instantiated |
-| `Crypt::Age::Header` | the text header — `create`, `parse`, `to_string`, `verify_mac`, `unwrap_file_key`, and `_header_bytes_for_mac` |
+| `Crypt::Age` | public API — `generate_keypair`, `encrypt`/`decrypt`, `encrypt_file`/`decrypt_file`, `encrypt_filehandle`/`decrypt_filehandle`. Class methods, never instantiated |
+| `Crypt::Age::Header` | the text header — `create`, `parse`, `parse_from_fh`, `to_string`, `verify_mac`, `unwrap_file_key`, and the `_bytes` attribute the MAC is taken over |
 | `Crypt::Age::Stanza` | stanza base class — `to_string`, the 64-column body wrap, `encode_base64_no_padding` / `decode_base64_no_padding` |
 | `Crypt::Age::Stanza::X25519` | `wrap` / `unwrap` for `-> X25519` stanzas (the only recipient type implemented) |
 | `Crypt::Age::Keys` | Bech32 (BIP-173) encode/decode, `age` / `age-secret-key-` HRPs, `public_key_from_secret` |
@@ -46,7 +46,7 @@ age-encryption.org/v1\n          <- version line
 | X25519 wrap key | `HKDF-SHA256(ikm=shared_secret, salt=ephemeral_share‖recipient, info="age-encryption.org/v1/X25519")`, 32 bytes | `derive_wrap_key` |
 | stanza body | `ChaCha20-Poly1305(wrap_key, file_key)` with a **12-byte all-zero nonce** → 32 bytes (16 ct + 16 tag) | `wrap_file_key` |
 | header MAC key | `HKDF-SHA256(ikm=file_key, salt="", info="header")` | `compute_header_mac` |
-| header MAC | HMAC-SHA256 over the header **up to and including `---`**, excluding the space after it and with **no trailing newline** | `_header_bytes_for_mac` |
+| header MAC | HMAC-SHA256 over the header **up to and including `---`**, excluding the space after it and with **no trailing newline** | `Header::_bytes` |
 | payload nonce | 16 bytes CSPRNG, sits immediately after the header's newline | `generate_payload_nonce` |
 | payload key | `HKDF-SHA256(ikm=file_key, salt=nonce, info="payload")` | `derive_payload_key` |
 | chunking | 64 KiB, ChaCha20-Poly1305, nonce = 11-byte big-endian counter ‖ `0x01` final / `0x00` otherwise | `encrypt_payload`, `_make_nonce` |
@@ -56,8 +56,9 @@ age-encryption.org/v1\n          <- version line
 
 **Read and write use different sources for the MAC input, and that asymmetry is
 deliberate.** `parse_from_fh` captures the literal header bytes as it reads them and
-stores them on the object; `verify_mac` MACs *those*. `create` has no bytes to capture,
-so its lazy builder re-serializes the stanzas through `Stanza::to_string`.
+stores them on the object as `_bytes`; `verify_mac` MACs *those*. `create` has no bytes
+to capture, so the lazy builder `_build__bytes` re-serializes the stanzas through
+`Stanza::to_string`.
 
 That split fixed the old failure mode — a header written by `age`, valid per the spec
 but formatted differently from ours, used to fail its own MAC here — but it does not
@@ -105,8 +106,13 @@ Two things worth carrying forward:
   reach it. The cpanfile pins that floor.
 
 Still absent by design, not defects: scrypt / passphrase recipients, the ssh and
-`mlkem768x25519` / tagged types, ASCII armor, and streaming for the top-level
-`encrypt_file` / `decrypt_file`, which still slurp.
+`mlkem768x25519` / tagged types, and ASCII armor.
+
+The file and filehandle API **streams**: `encrypt_file` / `decrypt_file` open handles and
+go through `_encrypt_fh` / `_decrypt_fh`, which chunk via `encrypt_payload_fh` /
+`decrypt_payload_fh`; `encrypt_filehandle` / `decrypt_filehandle` expose the same path to
+a caller's own handles. Only the string API `encrypt` / `decrypt` holds the whole message
+in memory, which is what a string API means. Do not "add streaming" that is already here.
 
 ## Keys
 
@@ -127,10 +133,17 @@ prove -lv t/07-testkit.t        # the 143 upstream vectors — runs without a bi
 prove -lv t/04-interop.t        # the real binary, when there is one
 ```
 
-**There is no `age` or `rage` on this machine.** `t/04-interop.t` resolves the CLI with
-`which age`, falls back to `which rage`, and `plan skip_all`s when neither exists — so
-it asserts nothing here, and a green suite is not evidence for a format-touching change
-on its own. Say which of the three you ran.
+**Never assume whether a binary is present — check, with `which age rage`.** Machines
+differ and this skill ships inside the tarball, so any claim here about what is installed
+would be wrong somewhere. `t/04-interop.t` resolves the CLI as `which age`, falling back
+to `which rage`, and `plan skip_all`s when neither exists. Two consequences:
+
+- With no binary the file asserts **nothing**, and a green suite is not evidence for a
+  format-touching change on its own.
+- The fallback is `age || rage`, not both — with both installed only `age` is ever
+  exercised. To cover the Rust side, run the file again with `age` hidden from `PATH`.
+
+Say which of the three commands you ran, and against which binary and version.
 
 `t/07-testkit.t` is what fills that hole: the C2SP/CCTV vectors, vendored under
 `t/testkit/`, 68 of 143 runnable against this implementation and 75 skipped with a

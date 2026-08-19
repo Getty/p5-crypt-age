@@ -49,10 +49,11 @@ plus one byte, and all 256 byte values. Gaps worth filling when asked: the empty
 plaintext, exactly 64 KiB (the chunk boundary where `is_final` is decided), and multiple
 recipients where only the second identity matches.
 
-`age` 1.1.1 is on PATH here. Note that the current file reads the CLI's output through
-backticks — for binary plaintext that is fine only because the comparison is against the
-same captured string; if you assert on length or on trailing bytes, write to a file and
-read it back `:raw` instead.
+Check with `which age rage` before you claim the file ran; the resolution is `age ||
+rage`, so with both installed only `age` is exercised. Note that the current file reads
+the CLI's output through backticks — for binary plaintext that is fine only because the
+comparison is against the same captured string; if you assert on length or on trailing
+bytes, write to a file and read it back `:raw` instead.
 
 ## Workflow
 

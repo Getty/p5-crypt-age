@@ -20,9 +20,10 @@ non-negotiable — apply silently, do not restate.
 ## The rule that governs this repo
 
 You are not designing a format. `c2sp.org/age` specifies every constant, every label,
-every byte offset, and `age` 1.1.1 on PATH is the executable version of that
-specification. Anything here that looks wrong — a 16-byte file key where 32 would feel
-natural, an all-zero AEAD nonce, a MAC that stops before the trailing newline — is far
+every byte offset, and the `age` binary — when one is on PATH; check, don't assume — is
+the executable version of that specification. Anything here that looks wrong — a 16-byte
+file key where 32 would feel natural, an all-zero AEAD nonce, a MAC that stops before
+the trailing newline — is far
 more likely to be a deliberate spec requirement than a bug. **Read the spec section
 before you change the line**, and when the spec and your intuition disagree, measure
 what the binary does.

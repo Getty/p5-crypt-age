@@ -54,7 +54,8 @@ chunking. `README.md` and `Changes` wording are not.
 
 This distribution's entire claim is that `age` and `rage` can read what it writes.
 `t/04-interop.t` is the only test that checks that direction, and it `plan skip_all`s
-when neither binary is on PATH — which is the case on this machine. `t/07-testkit.t`
+when neither binary is on PATH — so check with `which age rage` rather than assuming
+either way, and never report it as run when it skipped. `t/07-testkit.t`
 runs the 143 upstream vectors without a binary and covers the read side against bytes
 the reference implementation produced; it cannot cover the write side, because there is
 no reproducible way to inject our randomness.
@@ -64,8 +65,11 @@ Never report a green suite as evidence for a format-touching change. State which
 ```bash
 prove -lr t/               # unit only; -r matters, plain -l t/ is not recursive
 prove -lv t/07-testkit.t   # 143 upstream vectors; no binary needed
-prove -lv t/04-interop.t   # the real binary — NOT installed on this machine, skips
+prove -lv t/04-interop.t   # the real binary; skips when neither age nor rage is on PATH
 ```
+
+The file resolves `age || rage`, so with both installed only `age` runs. For the Rust
+side, run it again with `age` hidden from `PATH`.
 
 Self-consistency is the failure mode, not the safety net: this library decrypting its
 own output proves nothing about what `age` will accept.
