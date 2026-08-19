@@ -1,0 +1,26 @@
+---
+class: standard
+completed: 2026-08-19T18:41:52Z
+created: 2026-08-19T18:40:52Z
+id: 12
+priority: high
+started: 2026-08-19T18:41:52Z
+status: done
+tags:
+- packaging
+- release
+title: 'dzil build fails: no LICENSE in the distribution'
+updated: 2026-08-19T18:41:52Z
+---
+
+dzil build aborts before it produces a tarball:
+
+    [@Author::GETTY/LicenseFile] no LICENSE in the distribution:
+    run 'dzil genlicense' and commit the file
+
+There is no LICENSE file in the repository. dist.ini declares `license = Perl_5` and `copyright_holder = Torsten Raudssus`, so genlicense has everything it needs.
+
+Pre-existing, not introduced by any of the current work - found while verifying the karr #5 fix. It is a hard release blocker: no build, no tarball, and the release-checker cannot do its job either.
+
+Fix: run `dzil genlicense`, check the generated text names the right holder and year, and commit the file.
+Fixed and committed. dzil genlicense produced LICENSE (Perl_5, 2026 Torsten Raudssus) and it is now tracked - the tracking is the load-bearing half, since Git::GatherDir ships tracked files only. dzil build now runs through and writes Crypt-Age-0.002.tar.gz. No release attempted.
