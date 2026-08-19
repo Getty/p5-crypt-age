@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-08-19T18:30:36Z
+created: 2026-08-11T15:46:30Z
+id: 4
+priority: medium
+started: 2026-08-19T18:19:39Z
+status: done
+tags:
+- spec
+- wire
+title: Base64 decoder accepts what the spec says it MUST reject
+updated: 2026-08-19T18:30:36Z
+---
+
+Spec: "decoders MUST reject non-canonical encodings and encodings ending with = padding characters."
+
+Crypt::Age::Stanza::decode_base64_no_padding re-adds padding before decoding, so padded input and non-canonical trailing bits are both accepted.
+Fixed in lib/Crypt/Age/Stanza.pm: decode_base64_no_padding now rejects instead of repairing. Four checks, in order: '=' padding, any character outside the RFC 4648 section 4 alphabet, length % 4 == 1, and non-canonical trailing bits via re-encode-and-compare (encode_base64_no_padding(decoded) eq input). All four are needed because MIME::Base64 silently skips out-of-alphabet characters, drops a stray trailing character, and ignores the unused bits of the final group. No error message contains the input - it can be key material; the tests assert that explicitly with unlike(). Blast radius checked: this is also the decoder Header::parse_from_fh runs over every stanza body and over the MAC line, and both encodings we produce ourselves (43-char X25519 body, 43-char MAC) pass unchanged - a full encrypt/decrypt round trip is asserted in t/06-stanza.t and the existing suite is green. Regression tests cover one croak case per rule plus positive cases; verified red before the fix. prove -lr t/ passes (144 tests); t/04-interop.t SKIPPED - no age/rage binary here, so wire compatibility is NOT proven. POD rewritten: the old '=func decode_base64_no_padding' claim 'Automatically adds back the padding before decoding' was now false. Not committed; Changes entry not written (task restricted edits to Stanza.pm and t/06-stanza.t) - text handed to the delegating agent.
+Committed as 4237e07 on main together with #3. decode_base64_no_padding rejects padding, non-alphabet characters, length mod 4 == 1 and non-canonical trailing bits (re-encode and compare). No message names the input. This is now also the path by which Header::parse refuses a malformed header.
