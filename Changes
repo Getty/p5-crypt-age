@@ -1,6 +1,13 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - STREAM payload decryption no longer decides a chunk's finality from
+    end-of-file. A chunk is final because it authenticates under the
+    final-flag nonce, and any data after the final chunk now invalidates the
+    payload. Files that previously decrypted as if they had ended cleanly --
+    a spurious empty final chunk, trailing garbage, a second final chunk --
+    are rejected, and a full-length chunk written with the non-final nonce
+    releases its plaintext before the error instead of nothing at all.
   - Age headers whose stanza arguments contain anything outside printable
     ASCII (0x21-0x7e) are now rejected, as the format's ABNF requires. This
     applies to every stanza line regardless of recipient type -- a stray byte

@@ -374,7 +374,16 @@ sub decrypt_payload {
 
 Decrypts a chunked payload encrypted with C<encrypt_payload>.
 
-Dies if any chunk fails authentication. Returns the decrypted plaintext.
+Returns the decrypted plaintext. Dies on everything L</decrypt_payload_fh>
+dies on -- a chunk that fails authentication, input ending without a final
+chunk, an empty final chunk that is not the whole payload, or data after the
+final chunk.
+
+Unlike L</decrypt_payload_fh> this method releases nothing on failure: the
+partial plaintext is written to an internal buffer that is discarded when the
+call dies, so a caller only ever sees plaintext from a payload that was
+decrypted to its final chunk. Callers that need the streaming behaviour, and
+can handle the partial release that comes with it, want the filehandle form.
 
 =cut
 
@@ -383,38 +392,102 @@ sub decrypt_payload_fh {
 
     my $max_encrypted_chunk = CHUNK_SIZE + TAG_SIZE;
     my $counter = 0;
-    my $is_final = 0;
-    while (! $is_final) {
+    while (1) {
         # Each encrypted chunk is plaintext + 16 byte tag
         my $ct = $class->paranoid_read($ifh, $max_encrypted_chunk);
+
+        # paranoid_read only comes back short at end of file, so a short read
+        # is how this loop learns the file ends here. A *full* read says
+        # nothing either way: more chunks may follow, or this may be the final
+        # chunk sitting flush against the end of the file.
+        my $short_read = length($ct) < $max_encrypted_chunk;
+
+        if ($short_read) {
+            # Spec: "Streaming decryption MUST signal an error if the end of
+            # file is reached without successfully decrypting a final chunk."
+            croak 'Payload authentication failed at chunk '.$counter
+                . ': end of file reached without a final chunk'
+                if length($ct) == 0;
+            croak 'Payload authentication failed at chunk '.$counter
+                . ': chunk is shorter than its authentication tag'
+                if length($ct) < TAG_SIZE;
+            # Spec: "The final chunk MAY be shorter than 64 KiB but MUST NOT
+            # be empty unless the whole payload is empty."
+            croak 'Payload authentication failed at chunk '.$counter
+                . ': final chunk is empty and is not the only chunk'
+                if length($ct) == TAG_SIZE && $counter > 0;
+        }
+
         my $tag = substr($ct, -TAG_SIZE, TAG_SIZE, '');
 
-        $is_final = eof($ifh);
-        my $nonce = $class->_make_nonce($counter, $is_final);
-        my $ae = Crypt::AuthEnc::ChaCha20Poly1305->new($payload_key, $nonce);
-
-        my $plaintext = $ae->decrypt_add($ct);
-        croak "Payload authentication failed at chunk $counter"
-            unless $ae->decrypt_done($tag);
+        # The final-chunk flag lives in the nonce, so the only way to learn
+        # which nonce the writer used is to authenticate under it -- the
+        # file's length cannot answer it. A short chunk can only be the final
+        # one. A full chunk is tried as non-final first and, failing that, as
+        # a full-length final chunk. No ciphertext can authenticate under both
+        # nonces, so the second attempt cannot accept a chunk the writer did
+        # not mark that way: it is a second verification, not a second chance.
+        my $is_final = $short_read ? 1 : 0;
+        my $plaintext = $class->_open_chunk($payload_key, $counter, $is_final, $ct, $tag);
+        if (! defined($plaintext) && ! $is_final) {
+            $is_final = 1;
+            $plaintext = $class->_open_chunk($payload_key, $counter, $is_final, $ct, $tag);
+        }
+        croak "Payload authentication failed at chunk $counter" unless defined $plaintext;
 
         print {$ofh} $plaintext;
 
+        if ($is_final) {
+            # A final chunk ends the payload, so anything still in the file
+            # invalidates it -- trailing garbage as much as another
+            # well-formed chunk.
+            croak 'Payload authentication failed at chunk '.$counter
+                . ': trailing data after the final chunk'
+                if length($class->paranoid_read($ifh, 1));
+            return;
+        }
+
         $counter++;
     }
-
-    return;
 }
 
 =method decrypt_payload_fh
 
-    my $plaintext = Crypt::Age::Primitives->decrypt_payload_fh($payload_key, $ifh, $ofh);
+    Crypt::Age::Primitives->decrypt_payload_fh($payload_key, $ifh, $ofh);
 
-Decrypts a chunked payload encrypted with C<encrypt_payload>, using filehandles
-for both input and output.
+Decrypts a chunked payload encrypted with C<encrypt_payload>, reading the
+ciphertext from C<$ifh> and writing the plaintext to C<$ofh> one chunk at a
+time. Returns nothing.
 
-Dies if any chunk fails authentication.
+A chunk is final because it authenticates under the final-flag nonce, never
+because it happens to end the file. Dies if a chunk fails authentication under
+either nonce, if the input ends without a final chunk, if a final chunk other
+than the whole payload is empty, or if any byte follows the final chunk.
+
+B<On failure, plaintext already written to C<$ofh> stays there.> Decryption is
+streaming, so every chunk that authenticated before the error was released to
+the output handle: a truncated file yields its intact prefix and then dies. Each
+released chunk is individually authenticated, but the message as a whole is not
+-- its completeness is exactly what the error says was never established. A
+caller must therefore discard whatever reached C<$ofh> when this method dies,
+and must not treat it as an authenticated message merely because the individual
+bytes were authentic.
 
 =cut
+
+sub _open_chunk {
+    my ($class, $payload_key, $counter, $is_final, $ciphertext, $tag) = @_;
+
+    my $nonce = $class->_make_nonce($counter, $is_final);
+    my $ae = Crypt::AuthEnc::ChaCha20Poly1305->new($payload_key, $nonce);
+
+    # decrypt_add hands back unauthenticated plaintext, so it is only returned
+    # to the caller once decrypt_done has verified the tag over it.
+    my $plaintext = $ae->decrypt_add($ciphertext);
+    return unless $ae->decrypt_done($tag);
+
+    return $plaintext;
+}
 
 sub _make_nonce {
     my ($class, $counter, $is_final) = @_;

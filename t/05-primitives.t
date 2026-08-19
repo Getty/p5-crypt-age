@@ -4,6 +4,7 @@ use warnings;
 use Test::More;
 use Crypt::AuthEnc::ChaCha20Poly1305;
 use Crypt::PK::X25519;
+use Digest::SHA qw( sha256_hex );
 use Crypt::Age::Primitives;
 
 # Sanity: a normal exchange still works and both sides agree
@@ -118,6 +119,139 @@ use Crypt::Age::Primitives;
         $expected_2,
         'a 64 KiB + 1 byte payload splits into two chunks with counter 0 and 1'
     );
+}
+
+# STREAM finality, spec: "the last byte is 0x01 for the final chunk and 0x00
+# for all preceding ones", "The final chunk MAY be shorter than 64 KiB but
+# MUST NOT be empty unless the whole payload is empty", and "Streaming
+# decryption MUST signal an error if the end of file is reached without
+# successfully decrypting a final chunk."
+#
+# Which chunk is final is therefore stated by the nonce the writer
+# authenticated it with -- never by "the file happened to end here" -- and a
+# chunk that does authenticate as final has to be the last thing in the file.
+#
+# Every ciphertext below is built literally from Crypt::AuthEnc::ChaCha20Poly1305
+# and hand-written nonces rather than through encrypt_payload_fh, because our
+# own writer cannot produce any of these shapes: it always marks its true last
+# chunk final and never appends anything after it. That is precisely why no
+# round trip through this library -- unit or interop -- ever caught them.
+{
+    my $payload_key = pack('H*', '00' x 32);
+    my $chunk_size  = 64 * 1024;
+
+    my $nonce_0     = pack('H*', '000000000000000000000000');  # counter 0, not final
+    my $nonce_0_fin = pack('H*', '000000000000000000000001');  # counter 0, final
+    my $nonce_1_fin = pack('H*', '000000000000000000000101');  # counter 1, final
+
+    my $full = 'a' x $chunk_size;
+
+    # A full final chunk followed by bytes that are not a chunk at all.
+    {
+        my ($released, $error) = _decrypt_payload_capture(
+            $payload_key,
+            _seal($payload_key, $nonce_0_fin, $full) . 'garbage'
+        );
+        ok($error, 'trailing garbage after a final chunk is rejected');
+        _released_is($released, $full, 'the final chunk was still released before the error');
+    }
+
+    # A full final chunk followed by another well-formed chunk.
+    {
+        my ($released, $error) = _decrypt_payload_capture(
+            $payload_key,
+            _seal($payload_key, $nonce_0_fin, $full) .
+            _seal($payload_key, $nonce_1_fin, 'tail')
+        );
+        ok($error, 'a second chunk after a final chunk is rejected');
+        _released_is($released, $full, 'only the final chunk was released, never the one after it');
+    }
+
+    # A full chunk carrying the NOT-final nonce with nothing after it: the file
+    # ends without a final chunk, so it must fail -- but that chunk did
+    # authenticate under the nonce it was written with, so its plaintext is
+    # released first. Deciding finality from eof() instead would decrypt it
+    # under the final-flag nonce, fail the tag check, and release nothing.
+    {
+        my ($released, $error) = _decrypt_payload_capture(
+            $payload_key,
+            _seal($payload_key, $nonce_0, $full)
+        );
+        ok($error, 'a file ending without a final chunk is rejected');
+        _released_is($released, $full, 'the authenticated non-final chunk was released before the error');
+    }
+
+    # An empty final chunk is legal only when the whole payload is empty.
+    {
+        my ($released, $error) = _decrypt_payload_capture(
+            $payload_key,
+            _seal($payload_key, $nonce_0, $full) .
+            _seal($payload_key, $nonce_1_fin, '')
+        );
+        ok($error, 'an empty final chunk that is not the only chunk is rejected');
+        _released_is($released, $full, 'the preceding chunk was released before the error');
+    }
+
+    # The two shapes right next door, which must keep working: a full chunk
+    # that really is marked final and really does end the file, and the empty
+    # payload, the one case where an empty final chunk is required.
+    {
+        my ($released, $error) = _decrypt_payload_capture(
+            $payload_key,
+            _seal($payload_key, $nonce_0_fin, $full)
+        );
+        is($error, undef, 'a full final chunk at end of file still decrypts');
+        _released_is($released, $full, 'a full final chunk releases its plaintext');
+    }
+
+    {
+        my ($released, $error) = _decrypt_payload_capture(
+            $payload_key,
+            _seal($payload_key, $nonce_0_fin, '')
+        );
+        is($error, undef, 'an empty payload is a single empty final chunk and still decrypts');
+        _released_is($released, '', 'an empty payload releases nothing');
+    }
+
+    # No error message may carry key or plaintext material.
+    {
+        my (undef, $error) = _decrypt_payload_capture(
+            $payload_key,
+            _seal($payload_key, $nonce_0_fin, $full) . 'garbage'
+        );
+        unlike($error, qr/\Q$payload_key\E/, 'error does not leak the payload key');
+        unlike($error, qr/aaaaaaaa/,         'error does not leak plaintext');
+    }
+}
+
+# Runs decrypt_payload_fh over a ciphertext held in memory and reports both
+# halves of its contract: what reached the output handle, and whether it died.
+# Reading that handle after a die is the point -- partial release is part of
+# the documented behaviour here, not an accident.
+sub _decrypt_payload_capture {
+    my ($payload_key, $ciphertext) = @_;
+
+    open my $ifh, '<:raw', \$ciphertext or die "open input scalar fh: $!";
+    my $released = '';
+    open my $ofh, '>:raw', \$released or die "open output scalar fh: $!";
+
+    my $error;
+    unless (eval { Crypt::Age::Primitives->decrypt_payload_fh($payload_key, $ifh, $ofh); 1 }) {
+        $error = $@;
+    }
+
+    close $ofh;
+    close $ifh;
+
+    return ($released, $error);
+}
+
+# 64 KiB of plaintext in a Test::More diff is unreadable, so compare the length
+# and a digest rather than the bytes.
+sub _released_is {
+    my ($released, $expected, $name) = @_;
+    is(length($released), length($expected), "$name (length)");
+    is(sha256_hex($released), sha256_hex($expected), "$name (content)");
 }
 
 sub _seal {
