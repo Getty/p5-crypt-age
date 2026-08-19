@@ -1,0 +1,46 @@
+---
+class: standard
+completed: 2026-08-19T19:10:33Z
+created: 2026-08-11T15:46:20Z
+id: 2
+priority: high
+started: 2026-08-19T18:28:58Z
+status: done
+tags:
+- testing
+- interop
+title: Wire in the upstream age test kit
+updated: 2026-08-19T19:10:33Z
+---
+
+https://age-encryption.org/testkit is the authoritative vector set for the format. The suite currently proves compatibility only by shelling out to whatever age binary happens to be on PATH, and asserts nothing when none is.
+
+Vectors would give the distribution a compatibility proof that survives a machine without age installed, and would cover the malformed-input cases the current tests do not reach at all.
+Recherche: age-encryption.org/testkit redirected auf github.com/C2SP/CCTV, Ordner age/testdata, 143 Vektoren, real ca. 100 KB (du zeigt 632K, das ist Blockgroesse bei 4K-Bloecken). Lizenz 0BSD/CC0/Unlicense - Kopieren ins Repo ausdruecklich erlaubt, ohne Attribution.
+
+Format: Textheader (key: value je Zeile) + Leerzeile + age-File, teils zlib-komprimiert. Keys: expect (success | no match | HMAC failure | header failure | payload failure | armor failure), compressed, payload (hex SHA-256), identity (Bech32, mehrfach moeglich), passphrase, armored, file key, comment.
+
+Aufteilung fuer diese Distribution: rund 80 Vektoren sind direkt anwendbar (x25519_*, stanza_*, hmac_*, stream_*, header_crlf, version_unsupported, empty). Skippen: armor_* (kein Armor), scrypt_* (kein scrypt), hybrid_* (kein PQ) - der Testkit-README erlaubt genau das ausdruecklich fuer nicht implementierte Features.
+
+Achtung Semantik: bei nicht implementierten Recipient-Typen liefern wir 'no match' wo der Vektor 'header failure' erwartet - deshalb skippen statt aliasen. Und laut README muss bei 'payload failure' der Klartext, der VOR dem Fehler schon herausgegeben wurde, gegen den payload-Hash geprueft werden; das geht bei uns nur ueber decrypt_filehandle mit eigenem Output-Handle, nicht ueber decrypt_file.
+
+Reihenfolge: erst #1/#3/#4/#5/#7 fixen, dann das Testkit einziehen - mehrere dieser Vektoren (stanza_base64_padding, stanza_not_canonical, x25519_not_canonical_share, x25519_extra_argument, x25519_low_order, x25519_identity, stanza_missing_final_line) sind genau die Lackmustests fuer jene Tickets. Klon liegt bereit unter dem Scratchpad dieser Session.
+Imported the upstream age test kit (C2SP/CCTV, age/testdata, commit 1e3d2860d46e94e777e1b17c7a6f2436387e3ecc, 143 vectors) as a plain file copy under t/testkit/vectors/, with t/testkit/README.md documenting provenance/license/update procedure, and a new runner t/07-testkit.t.
+
+Files touched (only these, per the file boundary given): t/07-testkit.t (new), t/testkit/README.md (new), t/testkit/vectors/* (143 new files). Did not touch lib/, t/03-header.t, or cpanfile — no new dependency was needed (Digest::SHA and IO::Uncompress::Inflate are core; SHA-256/zlib both worked without any cpanfile change).
+
+Tally on this machine (no age/rage binary present, so t/07-testkit.t is currently the only compatibility proof that runs at all):
+  143 vectors total
+  run:     68 (59 pass, 9 fail)
+  skipped: 75 -- 33 armor (armored: yes), 42 unsupported recipient (scrypt/mlkem768x25519, detected from actual stanza types in the decompressed body + the passphrase: key, never from filename)
+  prove -lv t/07-testkit.t: FAIL (9/144 subtests red, by design -- see below)
+  prove -lr t/: FAIL for the same reason; all other 7 files green. t/04-interop.t skipped (no CLI on PATH), as expected.
+
+Skip/classification logic and its honesty limits (no-match vs HMAC-failure aliasing, the stream_no_nonce/stream_short_nonce header-vs-payload aliasing, why decrypt_filehandle not decrypt_file) are written out in full in t/07-testkit.t's header comment -- not repeating here.
+
+9 vectors currently fail against actual lib/ behaviour. Per your instruction I did NOT fix lib/, weaken any assertion, or add a TODO/skip marker -- they run as normal (red) assertions. Filed as two new tickets with full diagnosis:
+  - karr #14: stanza_invalid_character -- general stanza-argument character-set validation is missing (accepts non-VCHAR bytes in ANY stanza's argument, not just X25519). Distinct from #5 (closed), which only covers X25519-typed stanzas.
+  - karr #15 (high): 8 stream_* vectors (stream_last_chunk_empty, stream_no_final_full, stream_no_final_two_chunks_full, stream_trailing_garbage_short/long, stream_two_final_chunks, stream_two_final_chunks_full, stream_two_final_chunks_second) -- decrypt_payload_fh's is_final = eof($ifh) has no lookahead and no trailing-data check after accepting a final chunk. Invisible to every existing round-trip test since this library's own writer never produces the malformed shapes these vectors probe. Root-cause diagnosis is black-box (from vector behaviour), not verified against the real Go reference -- flagged as such in the ticket.
+
+Leaving #2 in-progress per your instruction pending your decision on #14/#15 (fix now, or TODO-list the known vectors in the runner -- I did not do either without asking).
+Committed as b891ee5, and green: 68/68 runnable vectors. Held back until #14 and #15 - both found by these vectors - were fixed, so the commit lands green instead of as a red suite with a promise. 75 skipped with per-reason counts printed (33 armor, 42 scrypt/hybrid), decided from header keys and actual stanza types rather than filenames.
