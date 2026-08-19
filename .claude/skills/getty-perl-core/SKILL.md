@@ -1,6 +1,6 @@
 ---
 name: getty-perl-core
-description: Load on any Perl edit in a Getty project — module loading, Moose patterns, cpanfile versioning, and the house choices that differ from Perl defaults.
+description: "Load on any Perl edit in a Getty project — module loading, attributes, errors, strings, control flow, cpanfile, Changes, and the house choices that differ from Perl defaults."
 ---
 
 # Perl Core — Getty House Rules
@@ -32,7 +32,7 @@ The rule is "always on", never "leave them out". Omitting them from a class is c
 - **`weak_ref => 1`** on attributes holding a reference back to a parent/owner — standard for nested object graphs, prevents circular refs.
 - **`namespace::autoclean`** on every class file. Classes extending DBIx::Class (`MooseX::NonMoose`) use **`MooseX::MarkAsMethods autoclean => 1`** instead.
 - **`no Moose;` + `__PACKAGE__->meta->make_immutable;`** at the bottom of every Moose class.
-- **Types:** `Types::Standard` / `Type::Tiny`. Typed attributes are wanted, not optional decoration — see `getty-perl-moo`.
+- **Types:** the tendency is to type what arrives from outside — Moose's own constraints where Moose is already there, `Types::Standard` where it is not. Not every distribution needs a type system, and none needs one for every field: `getty-perl-typing`.
 
 ## Singletons
 
@@ -126,7 +126,7 @@ cpanm --info Module::Name | tail -1
 # → GETTY/Module-Name-1.234.tar.gz  ← pin to 1.234
 ```
 
-Getty-authored (non-exhaustive): `Langertha`, `IO::K8s`, `Kubernetes::REST`, `WWW::Firecrawl`, `Net::Async::Firecrawl`, `Net::Async::WebSearch`, `Catalyst::Plugin::ChainedURI`, `Locale::Simple`, `DBIO::*`, `WWW::Zitadel`, `WWW::PayPal`, `WWW::Chain`.
+Getty-authored (non-exhaustive): `Langertha`, `IO::K8s`, `Kubernetes::REST`, `WWW::Crawl4AI`, `Net::Async::Crawl4AI`, `Net::Async::WebSearch`, `Catalyst::Plugin::ChainedURI`, `Locale::Simple`, `DBIO::*`, `WWW::Zitadel`, `WWW::PayPal`, `WWW::Chain`.
 
 ## Changelog (the Changes file)
 

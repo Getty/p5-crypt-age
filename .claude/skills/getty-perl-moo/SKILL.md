@@ -1,6 +1,6 @@
 ---
 name: getty-perl-moo
-description: Use when writing or refactoring Perl OO with Moo or Moo::Role — attributes, roles with requires, extends, thin classes, house-style import modules.
+description: "Use when writing classes or roles in a Moo distribution — `use Moo`, `use Moo::Role`, attributes, roles, delegation, lifecycle."
 ---
 
 # Perl/Moo – Architecture & Implementation Patterns
@@ -271,15 +271,17 @@ For Moose-style syntax in Moo (`isa => 'Str'`, `lazy_build`), use `MooX::late`. 
 
 ## Type Constraints
 
-Moo has no built-in type system. `isa` takes a coderef:
+Moo has no built-in type system — `isa` takes a coderef, and `Type::Tiny` objects
+are coderefs, so `Types::Standard` plugs straight in:
 
 ```perl
-use Types::Standard qw(Str Int ArrayRef);
-has name => (is => 'ro', isa => Str);
-has tags => (is => 'ro', isa => ArrayRef[Str], default => sub { [] });
+use Types::Standard qw( Str ArrayRef );
+has name => ( is => 'ro', isa => Str );
+has tags => ( is => 'ro', isa => ArrayRef[Str], default => sub { [] } );
 ```
 
-`Type::Tiny` / `Types::Standard` is the official recommendation in Moo docs (replaces `MooseX::Types`).
+Where to type and where not, own type libraries, parameter signatures:
+**`getty-perl-typing`**.
 
 ---
 
