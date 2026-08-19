@@ -1,6 +1,6 @@
 Revision history for Crypt-Age
 
-{{$NEXT}}
+0.002     2026-08-19 22:50:05Z
   - The distribution now carries the upstream age test kit: 143 vectors from
     C2SP/CCTV, run by t/07-testkit.t. 68 of them exercise this implementation
     and pass; the remaining 75 are skipped with a stated reason, since they
