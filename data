@@ -1,0 +1,62 @@
+---
+class: standard
+completed: 2026-08-19T18:40:48Z
+created: 2026-08-11T15:46:35Z
+id: 5
+priority: medium
+started: 2026-08-19T18:28:53Z
+status: done
+tags:
+- spec
+- x25519
+title: X25519 stanza arguments are not validated
+updated: 2026-08-19T18:40:48Z
+---
+
+Spec: the identity implementation MUST reject an X25519 stanza with other than exactly two arguments, or whose second argument is not a canonical base64 encoding of a 32-byte value.
+
+Header::parse splits the arg line on whitespace and passes whatever it finds through to Stanza::X25519::unwrap. The 32-byte body-length check the spec also requires (against partitioning oracles) IS effectively enforced via unwrap_file_key croaking, but it is swallowed by the eval in unwrap.
+Implemented, uncommitted in the working tree (maintainer reviews and commits).
+
+Measured on HEAD first, all six malformed cases got past Header::parse:
+  - two arguments: unwrap_file_key returned the correct file key. Accepted in
+    silence -- the extra argument was simply ignored.
+  - no argument: died in CryptX with 'FATAL: undefined key' after six 'Use of
+    uninitialized value' warnings from the base64 decoder.
+  - argument not 32 bytes: died in CryptX with 'FATAL: invalid key'. Incidental
+    -- that is import_key_raw's own length check, not an age-format check.
+  - body not 32 bytes: ticket claim CONFIRMED. Primitives::unwrap_file_key
+    croaks, the eval in Stanza::X25519::unwrap swallows it, unwrap returns
+    undef, and Header::unwrap_file_key reports 'No matching identity found' --
+    a soft no-match where the spec requires a header failure.
+
+Fix: a BUILD in Crypt::Age::Stanza::X25519 enforcing exactly one argument after
+the type, an argument decoding to 32 bytes, and a 32-byte body. Chosen over
+Header::parse or unwrap because Header::parse already dispatches on the type
+string to pick this class, so the check fires at parse time (header failure,
+before any identity is consulted) and is scoped to X25519 by class dispatch --
+unknown types stay plain Crypt::Age::Stanza objects and are still ignored, so
+grease needs no exemption. body is 'ro', so the 32-byte invariant holds for the
+object's lifetime; that is what leaves the eval in unwrap swallowing only the
+AEAD authentication failure, i.e. the genuine wrong-identity case. Base64
+canonicality is not re-checked -- the strict decoder from karr #3/#4 already
+covers padding, alphabet, impossible length and non-canonical trailing bits.
+
+Error messages name the reason only; tests assert the argument and body never
+appear in the error text.
+
+t/03-header.t: 6 rejection cases plus two must-keep-working cases (well-formed
+X25519 stanza; grease stanza with two non-32-byte arguments and a 10-byte body
+beside a valid X25519 stanza). Verified red against HEAD's lib in an isolated
+git-archive checkout: 12 failures. Green now.
+
+Verification: prove -lr t/ -> 183 tests, all pass; t/04-interop.t SKIPPED, no
+age/rage binary on this machine (which age / which rage both empty), so nothing
+here is interop-proven. t/07-testkit.t did not exist during this run.
+
+Follow-ups NOT done here (out of the file boundary given for this task):
+  - Changes needs a {{$NEXT}} bullet for the new rejection behaviour.
+  - Note for the skill: crypt-age-core states 'age 1.1.1 is on PATH on this
+    machine'. It is not, and has not been for this run.
+  - Header::parse_from_fh still carries no POD of its own (pre-existing).
+Committed as fa48954 on main. Checks live in Stanza::X25519::BUILD, so Header::parse rejects at parse time (header failure), while unknown stanza types are still ignored via class dispatch. Measured correction to the ticket: the worst case on HEAD was TWO arguments - silently accepted, correct file key unwrapped. Interop NOT proven, no age binary.
