@@ -6,7 +6,6 @@ allowed-tools: Read, Bash, Glob, Grep
 briefing:
   skills:
     - getty-perl-release-author-getty
-    - perl-release-dist-ini
     - getty-perl-core
     - crypt-age-core
     - kanban-issues-karr-cli
