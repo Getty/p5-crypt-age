@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-08-20T14:26:20Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T14:26:20Z
+created: 2026-08-20T13:58:39Z
+id: 24
+priority: low
+started: 2026-08-20T14:16:34Z
+status: done
+tags:
+- api
+title: encrypt/decrypt string API uses bare die where the house rule says croak
+updated: 2026-08-20T14:26:20Z
+---
+
+Sweep finding from #22, unrelated to the leak but on the same error paths.
+
+Crypt/Age.pm:108, 111, 155, 158 use bare "die" for the in-memory filehandle opens:
+
+  open my $ifh, :raw, \$plaintext or die "open on input string: $!";
+
+getty-perl-core is explicit that croak is the house rule and die where croak belongs is forbidden -- these report Crypt/Age.pm as the origin instead of the caller. They interpolate only $! so they are not a leak; every other error path in the file already croaks. Four one-word changes.
+
+Worth pairing with #20, which is about coverage of the documented error paths: the message text changes (croak appends the caller location instead of ours), so it is a user-visible change and wants its own Changes line.
+
+Also noticed on the same path and not ticketed separately: an undef entry in the recipients array produces two "Use of uninitialized value" warnings from Header::create before the croak. Argument validation is its own concern -- recording it here so it is not rediscovered.
+2026-08-20 14:20 Four bare die -> croak on the in-memory opens in encrypt/decrypt (Crypt/Age.pm 108,111,155,158). croak was already imported (use Carp qw(croak), line 5) and matches the other five modules. Sweep of lib/ found no other code-level bare die or warn -- the three remaining grep hits are POD prose. Regression test added to t/02-encrypt-decrypt.t: reaches the input-side opens without mocking (a >0xFF character string cannot be mapped into an in-memory handle) and asserts the error names the caller's file+line, not Crypt/Age.pm. Verified it fails 4/42 against the old die. Output-side opens are not caller-reachable and deliberately uncovered. prove -lr t/ 530 pass; prove -lv t/04-interop.t RAN, 120 tests against age 1.2.1 and rage 0.12.1. Changes entry left to the maintainer per instruction. Follow-up filed as #26.
+Fixed in HEAD: four die -> croak. Sweep of lib/ found no others (remaining die/warn are POD prose only). Tested for real via a string with code points above 0xFF; reverting to die fails the four location assertions.
