@@ -67,6 +67,14 @@ returned value. L</encrypt_file>, L</decrypt_file>, L</encrypt_filehandle> and
 L</decrypt_filehandle> stream instead: they read and write in 64 KiB chunks, so
 memory use stays bounded regardless of how large the file is.
 
+Every method here is byte-oriented: it encrypts and decrypts octets, never
+characters. The string API takes and returns byte strings; the file and
+filehandle API forces C<:raw> on every handle it touches, which removes an
+C<:encoding> layer the caller may have set on one. So encode a character
+string -- anything that has been through C<Encode::decode> or arrived through
+an C<:encoding> layer -- before you hand it over. L</encrypt> and L</decrypt>
+reject one outright when they can tell.
+
 See L</LIMITATIONS> below for what this module does not implement.
 
 =cut
@@ -104,6 +112,40 @@ sub encrypt {
 
     my $plaintext  = $args{plaintext}  // croak "plaintext required";
     my $recipients = $args{recipients} // croak "recipients required";
+
+    # This is perl's own test for the in-memory open below, hoisted so it can
+    # say what is wrong. PerlIO::scalar downgrades the string in place
+    # (sv_utf8_downgrade) and, when that cannot be done, warns "Strings with
+    # code points over 0xFF may not be mapped into in-memory file handles" and
+    # returns EINVAL -- so the open croaked "open on input string: Invalid
+    # argument", which tells a caller who passed decoded characters nothing at
+    # all. Running the test first replaces that with a message naming the
+    # cause, and the warning never happens because the open is never reached.
+    #
+    # Not utf8::is_utf8: it reports the internal representation, so a pure
+    # ASCII string that happens to be stored upgraded answers true while
+    # holding nothing above 0xFF. What decides this is the content.
+    #
+    # Not a /[^\x00-\xff]/ scan either, though both are free on an unflagged
+    # string (perl short-circuits: downgrade on the flag, the regex on the
+    # optimizer knowing that class cannot match a non-UTF-8 target -- measured
+    # at 2000 passes over 16 MiB in under 0.01s CPU for both). They part on a
+    # flagged string: over 16 MiB, downgrade costs 32ms against the regex's
+    # 55ms, and it *is* the scan perl is about to do, so it leaves the string
+    # downgraded and perl's repeat of it is then a flag test. The regex pays
+    # for that scan twice. Worth it either way, but this way costs least.
+    #
+    # Mutating our own copy is safe and changes nothing a caller can see:
+    # downgrading converts the representation, never the value, %args and the
+    # lexical are both copies, and on success perl's open performs this very
+    # conversion anyway. A failure leaves the string untouched.
+    #
+    # One bit comes back, which is all that may be reported anyway: the offset
+    # a scan would yield is derived from the caller's plaintext, and plaintext
+    # does not go into error messages.
+    utf8::downgrade($plaintext, 1)
+        or croak 'plaintext must be a byte string: it holds a code point '
+            .'above 0xFF, encode it before passing it in';
 
     open my $ifh, '<:raw', \$plaintext or croak "open on input string: $!";
 
@@ -144,6 +186,24 @@ C<plaintext> and the returned ciphertext are both held in memory in full. For
 large data, use L</encrypt_file> or L</encrypt_filehandle>, which stream in 64
 KiB chunks instead.
 
+C<plaintext> must be a B<byte string>. Encode a character string first:
+
+    use Encode qw( encode );
+
+    my $ciphertext = Crypt::Age->encrypt(
+        plaintext  => encode('UTF-8', $characters),
+        recipients => \@public_keys,
+    );
+
+A C<plaintext> holding a code point above C<0xFF> cannot be encrypted at all
+and is rejected before anything else happens, with C<"plaintext must be a byte
+string: it holds a code point above 0xFF, encode it before passing it in">.
+
+A character string whose code points all happen to fit in a byte is B<not>
+caught, because nothing distinguishes it from bytes: it is encrypted as those
+bytes, which is Latin-1, and L</decrypt> hands Latin-1 back. Encoding
+explicitly is the only way to decide which bytes get encrypted.
+
 =cut
 
 sub decrypt {
@@ -151,6 +211,13 @@ sub decrypt {
 
     my $ciphertext = $args{ciphertext} // croak "ciphertext required";
     my $identities = $args{identities} // croak "identities required";
+
+    # Same test, same reasons as in encrypt above; the advice differs because
+    # age ciphertext is binary, so a wide character in it means the caller
+    # decoded bytes that were never text rather than forgot to encode text.
+    utf8::downgrade($ciphertext, 1)
+        or croak 'ciphertext must be a byte string: it holds a code point '
+            .'above 0xFF, read it with :raw rather than decoding it';
 
     open my $ifh, '<:raw', \$ciphertext or croak "open on input string: $!";
 
@@ -186,6 +253,13 @@ Returns the decrypted plaintext.
 The method tries each identity against each recipient stanza in the header until
 one successfully unwraps the file key. Dies if no matching identity is found or
 if the MAC verification fails.
+
+C<ciphertext> must be a B<byte string>, and so is the plaintext this method
+returns. age ciphertext is binary, so read it with C<:raw> and never through
+an C<:encoding> layer; decode the returned plaintext yourself if the message
+was text. A C<ciphertext> holding a code point above C<0xFF> is rejected
+before anything else happens, with C<"ciphertext must be a byte string: it
+holds a code point above 0xFF, read it with :raw rather than decoding it">.
 
 C<ciphertext> and the returned plaintext are both held in memory in full. For
 large data, use L</decrypt_file> or L</decrypt_filehandle>, which stream in 64
@@ -303,7 +377,11 @@ Parameters:
 
 =back
 
-Both filehandles will be forced to be C<:raw> using C<binmode>.
+Both filehandles will be forced to be C<:raw> using C<binmode>. That removes
+every layer the caller had set, C<:encoding> included, so what is encrypted is
+the bytes in C<input> and never characters decoded from them. This method
+therefore needs no byte-string check of its own, unlike L</encrypt>: a handle
+delivers octets by the time it is read from here.
 
 The output stream will be in age format and can be decrypted with the C<age> or
 C<rage> command-line tools.
@@ -433,7 +511,10 @@ Parameters:
 
 =back
 
-Both filehandles will be forced to be C<:raw> using C<binmode>.
+Both filehandles will be forced to be C<:raw> using C<binmode>. That removes
+every layer the caller had set, C<:encoding> included, so C<input> is read as
+the binary it is and C<output> receives plaintext bytes -- decode them
+yourself if the message was text.
 
 Returns C<1> on success. Dies if a required argument is missing, if the header
 is invalid, if no identity matches any stanza, if the MAC verification fails,
@@ -519,8 +600,12 @@ version line that L<Crypt::Age::Header/parse_from_fh> requires. On the encrypt
 side, passing a recipient string that is not a Bech32 C<age1...> public key
 dies with C<"Unsupported recipient format at index N: expected an age1
 recipient">, C<N> being that recipient's position in the C<recipients> array.
-The rejected string is never quoted back: it may be a secret key passed where a
-recipient belongs, and the message would carry it into the caller's logs.
+A suffix names what arrived instead wherever that can be said without quoting
+it: a string that looks like a secret key adds C<", got an AGE-SECRET-KEY-1
+identity">, and an C<undef> entry adds C<", got undef">. The rejected string
+itself is never quoted back: it may be a secret key passed where a recipient
+belongs, and the message would carry it into the caller's logs. See
+L<Crypt::Age::Header/create>.
 
 =head1 SECURITY
 

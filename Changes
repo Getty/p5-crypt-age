@@ -1,6 +1,19 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - encrypt and decrypt now reject a character string with a message that names
+    the cause and the fix, instead of passing perl's EINVAL through from the
+    in-memory open: "plaintext must be a byte string: it holds a code point
+    above 0xFF, encode it before passing it in", and the ciphertext counterpart
+    advising :raw rather than encoding, since wide ciphertext means binary that
+    was decoded by mistake. Perl's own "code points over 0xFF" warning no longer
+    fires either, because the check runs before the open. The POD now states the
+    byte-string requirement for all six methods -- including its honest limit: a
+    character string whose code points all fit in a byte is indistinguishable
+    from bytes and is encrypted as Latin-1.
+  - The LIMITATIONS section now documents both suffixes of the recipient
+    rejection, ", got undef" and ", got an AGE-SECRET-KEY-1 identity", instead of
+    only the base message.
   - Crypt::Age::Keys::bech32_decode no longer echoes the character it rejected.
     It now reports "Invalid bech32 character at offset N", a 0-based offset into
     the string that was passed in, so substr($encoded, $N, 1) lands on the

@@ -339,22 +339,26 @@ use Crypt::Age::Header;
         'none of the input content appears in the error');
 }
 
-# Ticket #24 regression: the in-memory filehandle opens in encrypt/decrypt
-# used a bare `die`, so a failure there blamed Crypt/Age.pm instead of the
-# caller. They croak now. Reaching them needs no mocking: perl refuses to
-# map a string holding code points above 0xFF into an in-memory handle, so
-# handing the string API a character (decoded) string rather than bytes
-# makes the *input* open return false with $! set. The output-side opens
-# (on a lexical the method owns) have no caller-reachable failure and are
-# deliberately not covered here.
+# Ticket #26, carrying the #24 regression: the string API takes bytes. Perl
+# refuses to map a string holding a code point above 0xFF into an in-memory
+# handle, so handing encrypt/decrypt a character (decoded) string used to fail
+# at the *input* open. #24 made that open croak instead of die, which put the
+# blame on the caller -- those location assertions are kept below, they are
+# the point of the block. #26 replaces what the caller is told: EINVAL from an
+# in-memory open ("open on input string: Invalid argument") names no cause and
+# suggests no fix, so encrypt/decrypt now run perl's own downgrade test first
+# and say what is wrong. The open is no longer reached on this path, so perl's
+# "code points over 0xFF" warning is gone too -- asserted, not suppressed.
+#
+# The output-side opens (on a lexical the method owns, written through :raw)
+# have no caller-reachable failure and are deliberately not covered here.
 {
     my ($public, $secret) = Crypt::Age->generate_keypair;
     my $wide = "\x{100} not bytes";
 
-    my ($enc_err, $enc_line);
+    my ($enc_err, $enc_line, @enc_warn);
     {
-        # perl warns about the >0xFF mapping before open returns false.
-        local $SIG{__WARN__} = sub {};
+        local $SIG{__WARN__} = sub { push @enc_warn, $_[0] };
         local $@;
         $enc_line = __LINE__ + 1;
         eval { Crypt::Age->encrypt(plaintext => $wide, recipients => [$public]) };
@@ -362,17 +366,24 @@ use Crypt::Age::Header;
     }
 
     ok($enc_err, 'encrypt with a wide-character plaintext dies');
-    like($enc_err, qr/^open on input string: /,
-        'the message names the failing in-memory open');
+    like($enc_err,
+        qr/^plaintext must be a byte string: it holds a code point above 0xFF, encode it before passing it in\b/,
+        'the message names the cause and the fix, not EINVAL');
+    unlike($enc_err, qr/Invalid argument/,
+        'encrypt no longer passes perl\'s EINVAL through');
+    is_deeply(\@enc_warn, [],
+        'the check runs before the open, so perl emits no >0xFF warning');
     unlike($enc_err, qr{Crypt/Age\.pm},
         'encrypt croaks: Crypt/Age.pm is not blamed as the origin');
     my $enc_where = quotemeta(__FILE__).' line '.$enc_line;
     like($enc_err, qr/$enc_where/,
         'encrypt reports the caller position in this test file');
+    ok(index($enc_err, 'not bytes') == -1,
+        'no part of the plaintext appears in the error');
 
-    my ($dec_err, $dec_line);
+    my ($dec_err, $dec_line, @dec_warn);
     {
-        local $SIG{__WARN__} = sub {};
+        local $SIG{__WARN__} = sub { push @dec_warn, $_[0] };
         local $@;
         $dec_line = __LINE__ + 1;
         eval { Crypt::Age->decrypt(ciphertext => $wide, identities => [$secret]) };
@@ -380,13 +391,119 @@ use Crypt::Age::Header;
     }
 
     ok($dec_err, 'decrypt with a wide-character ciphertext dies');
-    like($dec_err, qr/^open on input string: /,
-        'the message names the failing in-memory open');
+    like($dec_err,
+        qr/^ciphertext must be a byte string: it holds a code point above 0xFF, read it with :raw rather than decoding it\b/,
+        'the message names the cause and the fix, not EINVAL');
+    unlike($dec_err, qr/Invalid argument/,
+        'decrypt no longer passes perl\'s EINVAL through');
+    is_deeply(\@dec_warn, [],
+        'the check runs before the open, so perl emits no >0xFF warning');
     unlike($dec_err, qr{Crypt/Age\.pm},
         'decrypt croaks: Crypt/Age.pm is not blamed as the origin');
     my $dec_where = quotemeta(__FILE__).' line '.$dec_line;
     like($dec_err, qr/$dec_where/,
         'decrypt reports the caller position in this test file');
+}
+
+# Ticket #26 counter-proof: the check must reject only what perl cannot map,
+# and nothing else. The three cases below all have to keep working, and the
+# second is the one that rules out utf8::is_utf8 as the test -- it reports the
+# internal representation, so an upgraded string answers true while holding
+# nothing above 0xFF, and using it here would reject perfectly good data.
+{
+    my ($public, $secret) = Crypt::Age->generate_keypair;
+
+    my %case = (
+        'every byte 0x00-0xFF'      => join('', map { chr } 0 .. 255),
+        'upgraded, all <= 0xFF'     => do { my $s = "caf\x{e9} \x{ff}"; utf8::upgrade($s); $s },
+        'upgraded, pure ASCII'      => do { my $s = 'plain ascii'; utf8::upgrade($s); $s },
+    );
+
+    for my $name (sort keys %case) {
+        my $plaintext = $case{$name};
+        my $before    = $plaintext;
+        my $flagged   = utf8::is_utf8($plaintext) ? 1 : 0;
+
+        my @warn;
+        my $round = do {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            Crypt::Age->decrypt(
+                ciphertext => Crypt::Age->encrypt(
+                    plaintext  => $plaintext,
+                    recipients => [$public],
+                ),
+                identities => [$secret],
+            );
+        };
+
+        is($round, $before, "$name: round-trips unchanged");
+        ok(!utf8::is_utf8($round), "$name: decrypt returns a byte string");
+        is_deeply(\@warn, [], "$name: no warnings on the way through");
+
+        # encrypt downgrades its own copy, never the caller's scalar: %args and
+        # the lexical are both copies, and the value would survive either way,
+        # but a refactor that took \$args{plaintext} directly would show here.
+        is($plaintext, $before, "$name: the caller's string keeps its value");
+        is(utf8::is_utf8($plaintext) ? 1 : 0, $flagged,
+            "$name: the caller's string keeps its representation");
+    }
+}
+
+# Ticket #27: the LIMITATIONS section of Crypt::Age quotes the recipient
+# rejection. #25 gave that message two suffixes filling one "what arrived
+# instead" slot, and the quote kept only the base form. A POD that quotes an
+# error message is worth exactly its accuracy, so pin both ends: what the code
+# emits, and what the section claims it emits. The messages are taken through
+# the public API here because that is the surface the section documents;
+# t/03-header.t pins the same three at Crypt::Age::Header->create.
+{
+    my ($public)        = Crypt::Age->generate_keypair;
+    my (undef, $secret) = Crypt::Age->generate_keypair;
+
+    my $base = 'Unsupported recipient format at index N: expected an age1 recipient';
+
+    my %case = (
+        'an unrelated string' => ['not-a-recipient', ''],
+        'a secret key'        => [$secret,           ', got an AGE-SECRET-KEY-1 identity'],
+        'an undef entry'      => [undef,             ', got undef'],
+    );
+
+    for my $name (sort keys %case) {
+        my ($bad, $suffix) = @{$case{$name}};
+
+        my $err = do {
+            local $@;
+            eval {
+                Crypt::Age->encrypt(
+                    plaintext  => 'x',
+                    recipients => [$public, $bad],
+                );
+            };
+            $@;
+        };
+
+        # The whole message, not a prefix of it: anchoring on croak's " at FILE
+        # line N." tail is what makes the empty-suffix case a counter-proof --
+        # a suffix leaking into it would no longer match.
+        (my $expect = $base.$suffix) =~ s/\bindex N\b/index 1/;
+        like($err, qr/^\Q$expect\E(?: at |\z)/,
+            "$name: encrypt reports exactly the documented message");
+    }
+
+    # Read the module that was actually loaded, not a path guessed from cwd.
+    my $flat = do {
+        open my $fh, '<:raw', $INC{'Crypt/Age.pm'}
+            or die "cannot read the loaded Crypt::Age: $!";
+        local $/;
+        my $source = <$fh>;
+        $source =~ s/\s+/ /g;    # the POD wraps; the quoted message does not
+        $source;
+    };
+
+    for my $quoted ($base, map { $case{$_}[1] } grep { length $case{$_}[1] } keys %case) {
+        ok(index($flat, $quoted) >= 0,
+            'Crypt::Age POD quotes "'.$quoted.'"');
+    }
 }
 
 done_testing;
