@@ -1,0 +1,42 @@
+---
+claimed_at: 2026-08-20T15:53:53Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T15:53:53Z
+created: 2026-08-20T14:23:11Z
+id: 27
+priority: low
+started: 2026-08-20T15:36:55Z
+status: done
+tags:
+- docs
+title: Crypt::Age ERRORS POD does not mention the ', got undef' recipient variant
+updated: 2026-08-20T15:53:53Z
+---
+
+Split out of #25, which added a ", got undef" suffix to the Header::create recipient rejection (same skeleton and same prefix as the existing ", got an AGE-SECRET-KEY-1 identity" hint, filling the same "what arrived instead" slot).
+
+The =method create POD in lib/Crypt/Age/Header.pm was updated in the same edit. The ERRORS section of lib/Crypt/Age.pm (around line 520) quotes the same message and was not: it still lists only the base form. Nothing there is wrong -- the base message and its prefix are unchanged -- it is merely incomplete.
+
+Not fixed in #25 because lib/Crypt/Age.pm was being edited concurrently for #24, and #25 was scoped to one file.
+2026-08-20 15:52 Done in lib/Crypt/Age.pm + t/02-encrypt-decrypt.t.
+
+Note on the ticket wording: there is no =head1 ERRORS section in Crypt::Age. The quote at the line the ticket names lives in =head1 LIMITATIONS, which is the section that documents the error surface. That is what was edited.
+
+The paragraph now carries both suffixes, kept consistent with the =method create POD in Header.pm rather than restated: "A suffix names what arrived instead wherever that can be said without quoting it: a string that looks like a secret key adds ", got an AGE-SECRET-KEY-1 identity", and an undef entry adds ", got undef"." Plus a See L<Crypt::Age::Header/create> pointer, so there is one description and one reference rather than two descriptions.
+
+Full audit of the error prose in Crypt/Age.pm against today code. The recipient message was the ONLY stale item. Verified current and left alone:
+  - "No matching identity found" (Header.pm unwrap_file_key) -- quoted correctly
+  - the literal age-encryption.org/v1 version line claim -- the reworded "Invalid age version: expected the literal ... version line" croak is described, not quoted, and the description still holds
+  - "Invalid bech32 character at offset N" -- reworded in #23 but never quoted in this file, nothing to update
+  - the four die -> croak from #24 -- never documented as messages; the one caller-reachable path is now documented by #26
+  - the failure lists on encrypt_file, encrypt_filehandle, decrypt_file, decrypt_filehandle -- accurate
+  - the unrecognized-stanza-types-are-ignored and unwrap_file_key-only-tries-X25519 claims -- checked against the code, both hold
+
+One thing found that is incomplete rather than stale, filed as #29 instead of pulled in: =method decrypt lists only two of its failure modes while decrypt_file and decrypt_filehandle list the fuller set.
+
+Regression test: the three messages are pinned through the public API (whole message, anchored on croak tail, so a suffix leaking into the base case fails), and the three quoted fragments are pinned against the POD of the loaded module -- which is what would have caught this ticket. Survives Pod::Weaver, verified under dzil test where the module loads from the woven blib copy. Counter-proofs: dropping ", got undef" from the POD fails the quote assertion; dropping the suffix from Header::create fails the message assertion.
+
+prove -lr t/: 574 tests, PASS. prove -lv t/04-interop.t: RAN, 120 tests (age 1.2.1 + rage 0.12.1), PASS.
+
+Changes entry still to write (left to the maintainer as instructed).
