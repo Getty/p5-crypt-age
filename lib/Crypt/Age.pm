@@ -14,7 +14,7 @@ use namespace::clean;
 
     # Generate keypair
     my ($public, $secret) = Crypt::Age->generate_keypair();
-    # $public  = "age1ql3z7hjy..."
+    # $public  = "age19ljhmg68..."
     # $secret  = "AGE-SECRET-KEY-1..."
 
     # Encrypt data
@@ -464,7 +464,7 @@ the primitive layer.
 Public keys are Bech32-encoded X25519 public keys with the human-readable
 part C<age>:
 
-    age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+    age19ljhmg68e43yx9fgm2k9lwefquc0la5y4lzvlshdjzv47kxt8d6qr9vf4p
 
 =head2 Secret Keys
 
@@ -517,7 +517,10 @@ only tries stanzas it recognizes as C<X25519>. An armored file fails even
 earlier, because its first line is not the literal C<age-encryption.org/v1>
 version line that L<Crypt::Age::Header/parse_from_fh> requires. On the encrypt
 side, passing a recipient string that is not a Bech32 C<age1...> public key
-dies with C<"Unsupported recipient format">.
+dies with C<"Unsupported recipient format at index N: expected an age1
+recipient">, C<N> being that recipient's position in the C<recipients> array.
+The rejected string is never quoted back: it may be a secret key passed where a
+recipient belongs, and the message would carry it into the caller's logs.
 
 =head1 SECURITY
 

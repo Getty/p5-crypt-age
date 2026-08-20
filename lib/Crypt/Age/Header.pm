@@ -95,11 +95,32 @@ sub create {
     my ($class, $file_key, $recipients) = @_;
 
     my @stanzas;
-    for my $recipient (@$recipients) {
-        if ($recipient =~ /^age1/) {
+    for my $i (0 .. $#{$recipients}) {
+        my $recipient = $recipients->[$i];
+        # The prefix test is case-insensitive because BIP-173 makes the
+        # all-uppercase form the same encoding of the same string, and
+        # Keys::decode_public_key already accepts it. A mixed-case recipient
+        # still dies: it reaches decode_public_key and is rejected there by
+        # bech32_decode's mixed-case guard.
+        if ($recipient =~ /^age1/i) {
             push @stanzas, Crypt::Age::Stanza::X25519->wrap($file_key, $recipient);
         } else {
-            croak "Unsupported recipient format: $recipient";
+            # Never interpolate $recipient. The likeliest way to reach this
+            # croak is a caller swapping recipient and identity -- both are
+            # plain strings -- and the exception travels into whatever log
+            # catches it, so echoing the string puts a whole secret key there.
+            # The message is therefore built from literals plus the array
+            # index, which locates the bad entry in the caller's own array and
+            # copies no byte of it. The identity hint is a classification
+            # against a public format prefix, not a quotation of the value: it
+            # carries one bit about a constant that every age tutorial prints,
+            # and structurally cannot expose key material. age(1) and rage(1)
+            # do echo the string, but there it was already a command-line
+            # argument; a library error message is not.
+            my $hint = $recipient =~ /^AGE-SECRET-KEY-1/i
+                ? ', got an AGE-SECRET-KEY-1 identity' : '';
+            croak 'Unsupported recipient format at index '.$i
+                .': expected an age1 recipient'.$hint;
         }
     }
 
@@ -131,6 +152,23 @@ Parameters:
 
 Returns a L<Crypt::Age::Header> object with stanzas for each recipient and a
 computed MAC.
+
+The C<age1> prefix is matched case-insensitively, so an all-uppercase
+C<AGE1...> recipient is accepted as well -- BIP-173 defines it as the same
+encoding of the same key, and L<Crypt::Age::Keys/decode_public_key> decodes it.
+A recipient mixing the two cases is not: it dies with C<Invalid bech32: mixed
+case> from L<Crypt::Age::Keys/bech32_decode>. Any other recipient string dies
+with C<"Unsupported recipient format at index N: expected an age1 recipient">,
+where C<N> is the recipient's position in C<\@recipients>. A string that looks
+like an identity adds C<", got an AGE-SECRET-KEY-1 identity"> -- the swap of
+recipient and identity is the likely mistake, and both are plain strings.
+
+The offending string itself is never part of the message. It may be a secret
+key, and the exception ends up in the caller's logs; the index locates the
+entry without quoting it.
+
+The case of the recipient string does not reach the file. It is decoded to raw
+bytes here, and the stanza carries the ephemeral public key, not the recipient.
 
 =cut
 
@@ -190,7 +228,13 @@ sub parse_from_fh {
 
     # Check version
     chomp(my $version_line = $bytes); # remove \x{0a}
-    croak "Invalid age version: $version_line" unless $version_line eq VERSION_LINE;
+    # Never interpolate $version_line: reaching this croak means the input is
+    # not an age file, so the line is whatever the caller handed over -- a line
+    # of plaintext, or the entire input when it contains no newline at all.
+    # The check is against a single literal, so naming the expected value says
+    # everything the caller needs without quoting theirs.
+    croak 'Invalid age version: expected the literal '.VERSION_LINE
+        .' version line' unless $version_line eq VERSION_LINE;
 
     # read the rest of the header
     my (@stanzas, $mac);

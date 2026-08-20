@@ -1,6 +1,38 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - SECURITY: two error paths no longer echo what the caller passed in. Header
+    parsing died with "Invalid age version: $version_line", where $version_line
+    is the first line of the supplied ciphertext -- and since the read is
+    newline-delimited, an input without a newline put its entire content in the
+    exception. Hand decrypt a plaintext by mistake and the whole thing lands in
+    whatever logs that exception. It now names only the version line it expected.
+    Likewise the recipient dispatch died with "Unsupported recipient format:
+    $recipient": swap the recipients and identities arguments -- both are just
+    strings -- and the full secret key was echoed. It now reports the 0-based
+    index of the offending entry, plus a hint when the string looks like an
+    AGE-SECRET-KEY-1 identity. Both messages are now built from literals and an
+    integer; no byte of the input reaches them. Note that age 1.2.1 and rage
+    0.12.1 both echo the key here -- for a CLI it was already in argv, whereas a
+    library exception ends up in the caller's log, so this deviation is deliberate.
+  - Crypt::Age::Header::create now accepts an all-uppercase AGE1... recipient.
+    The dispatch tested /^age1/ case-sensitively while its identity counterpart
+    used /i and decode_public_key accepted either case, so a key this
+    distribution itself called valid was refused by encrypt. BIP-173 makes the
+    all-uppercase form the same encoding of the same string and rage 0.12.1
+    accepts it. A mixed-case recipient still dies -- now in bech32_decode's
+    mixed-case guard rather than the prefix test. Verified with the CSPRNG
+    pinned: both spellings of one key produce byte-identical ciphertext, and the
+    recipient string never reaches the file, so nothing about the format changes.
+  - The documented example keys are now an actual keypair. README.md and both
+    the SYNOPSIS and KEY FORMAT sections of Crypt::Age presented a public and a
+    secret key together, but the public key did not belong to the secret key --
+    copying both out of the documentation produced "No matching identity found".
+  - Test coverage for error paths that had none: both HRP mismatches in
+    Crypt::Age::Keys, the recipient rejection, and the version-line rejection.
+    The two leak fixes above are pinned by searching the message for a fragment
+    of the secret rather than by matching its text, so a future edit that puts a
+    different part of the input back in still fails the test.
   - t/04-interop.t now runs its whole block once per CLI it finds instead of
     resolving `age || rage` and exercising only the first. On a machine with
     both installed it reports 120 assertions, 60 tagged [age] and 60 tagged

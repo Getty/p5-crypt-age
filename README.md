@@ -9,7 +9,7 @@ use Crypt::Age;
 
 # Generate a keypair
 my ($public_key, $secret_key) = Crypt::Age->generate_keypair();
-# $public_key = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p"
+# $public_key = "age19ljhmg68e43yx9fgm2k9lwefquc0la5y4lzvlshdjzv47kxt8d6qr9vf4p"
 # $secret_key = "AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ8H00W3"
 
 # Encrypt data
@@ -83,7 +83,7 @@ here - see [Current Limitations](#current-limitations).
 Public keys are Bech32-encoded with the human-readable part `age`:
 
 ```
-age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+age19ljhmg68e43yx9fgm2k9lwefquc0la5y4lzvlshdjzv47kxt8d6qr9vf4p
 ```
 
 ### Secret Keys

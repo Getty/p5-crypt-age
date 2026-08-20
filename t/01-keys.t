@@ -54,6 +54,28 @@ use Crypt::Age::Keys;
     like($@, qr/Invalid bech32/, 'rejects invalid bech32');
 }
 
+# Ticket #20: decode_public_key's and decode_secret_key's HRP-mismatch
+# croaks (Keys.pm:101, Keys.pm:138) are documented in their own POD as the
+# behaviour a caller can rely on ("Dies if the HRP is not ..."), but nothing
+# in t/ asserted either message -- confirmed by grep before this was written.
+# The natural way to reach them is a caller passing the wrong kind of key --
+# an identity where a public key belongs, or the reverse -- so this uses real
+# generated keys rather than a synthetic HRP. bech32_decode does not
+# lowercase the HRP it returns (only the checksum check does that
+# internally), so the secret key's HRP surfaces in the message exactly as
+# the key carries it: uppercase.
+{
+    my ($public, $secret) = Crypt::Age::Keys->generate_keypair;
+
+    eval { Crypt::Age::Keys->decode_public_key($secret) };
+    like($@, qr/^Invalid public key HRP: expected 'age', got 'AGE-SECRET-KEY-'/,
+        'decode_public_key on a secret key string reports the documented HRP mismatch');
+
+    eval { Crypt::Age::Keys->decode_secret_key($public) };
+    like($@, qr/^Invalid secret key HRP: expected 'age-secret-key-', got 'age'/,
+        'decode_secret_key on a public key string reports the documented HRP mismatch');
+}
+
 # Test Bech32 with known test vectors
 {
     # These are test vectors from BIP-173

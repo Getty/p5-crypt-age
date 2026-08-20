@@ -485,4 +485,54 @@ use Crypt::Age::Stanza::X25519;
     }
 }
 
+# Ticket #22 regression, the recipient-format half: Header::create's
+# rejection of a non-age1 recipient used to interpolate the caller's string
+# directly into the croak ("Unsupported recipient format: $recipient"), so
+# a caller who swapped recipient and identity got the whole secret key
+# echoed into the exception, and from there into whatever logs it. The fix
+# rebuilds the message from literals plus the recipient's 0-based array
+# index and, when the string matches /^AGE-SECRET-KEY-1/i, a hint that
+# classifies against that public format prefix without copying a byte of
+# the caller's string.
+#
+# The bad entry sits at index 1, not 0, so the index actually has to be
+# computed rather than being coincidentally right. The decisive assertion
+# is the negative one: it searches the message for a slice of the secret
+# rather than comparing against the expected text, so it still catches a
+# future edit that echoes some other slice of the string.
+{
+    my ($public)     = Crypt::Age::Keys->generate_keypair;
+    my (undef, $secret) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+
+    # A non-identity, non-age1 string at the same non-zero index: the base
+    # message, with no identity hint.
+    my $err_plain = do {
+        local $@;
+        eval { Crypt::Age::Header->create($file_key, [$public, 'not-an-age-key']) };
+        $@;
+    };
+    like($err_plain,
+        qr/^Unsupported recipient format at index 1: expected an age1 recipient\b/,
+        'a non-identity recipient at index 1 gets the base message with the correct index');
+    unlike($err_plain, qr/got an AGE-SECRET-KEY-1 identity/,
+        'and no identity hint, since the string does not look like one');
+
+    # A secret key at the same index: the base message plus the identity
+    # hint, and no leaked key material.
+    my $err_secret = do {
+        local $@;
+        eval { Crypt::Age::Header->create($file_key, [$public, $secret]) };
+        $@;
+    };
+    like($err_secret,
+        qr/^Unsupported recipient format at index 1: expected an age1 recipient, got an AGE-SECRET-KEY-1 identity/,
+        'a secret key at index 1 gets the base message plus the identity hint, with the correct index');
+
+    my $needle = substr($secret, 8, 20);
+    is(length($needle), 20, 'fixture: probed substring is 20 bytes long');
+    ok(index($err_secret, $needle) == -1,
+        'no characteristic slice of the secret key leaks into the message');
+}
+
 done_testing;

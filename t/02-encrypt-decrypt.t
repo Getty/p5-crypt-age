@@ -267,4 +267,76 @@ use Crypt::Age::Header;
     like($@, qr/ciphertext required/, 'decrypt requires ciphertext');
 }
 
+# Ticket #19 regression: Header::create dispatches recipients with
+# /^age1/i, matching the /^AGE-SECRET-KEY-1/i already used on the identity
+# side. Before the fix the recipient dispatch had no /i, so
+# Crypt::Age->encrypt(recipients => [uc($public)]) died with "Unsupported
+# recipient format" even though Keys::decode_public_key(uc($public)) alone
+# accepted the same string -- the read side kept the promise, the write
+# side did not.
+{
+    my ($public, $secret) = Crypt::Age->generate_keypair;
+    my $plaintext = "Ticket #19 regression fixture";
+
+    # (1) an all-uppercase AGE1... recipient encrypts and round-trips with
+    # the matching identity.
+    my $encrypted = eval {
+        Crypt::Age->encrypt(plaintext => $plaintext, recipients => [uc($public)]);
+    };
+    is($@, '', 'an all-uppercase AGE1... recipient encrypts without dying');
+    my $decrypted = Crypt::Age->decrypt(ciphertext => $encrypted, identities => [$secret]);
+    is($decrypted, $plaintext,
+        'ciphertext for an uppercase recipient decrypts with the matching identity');
+
+    # (2) a mixed-case recipient is rejected, but specifically by the
+    # bech32 mixed-case guard, not by the "Unsupported recipient format"
+    # branch. That distinction is the regression: it shows the string
+    # passed the /^age1/i prefix test and was only then rejected inside
+    # decode_public_key -- a test that only checked "dies somehow" would
+    # not catch the prefix test itself going missing.
+    my $mixed = 'Age1' . substr($public, 4);
+    ok($mixed =~ /^age1/i && $mixed ne lc($mixed) && $mixed ne uc($mixed),
+        'fixture: mixed-case recipient matches the prefix case-insensitively and is genuinely mixed case')
+        or die 'fixture assumption broken -- generated public key data has no lowercase letter to mix';
+
+    eval { Crypt::Age->encrypt(plaintext => $plaintext, recipients => [$mixed]) };
+    like($@, qr/Invalid bech32: mixed case/,
+        'a mixed-case recipient dies with the bech32 mixed-case guard');
+    unlike($@, qr/Unsupported recipient format/,
+        'and not with the encrypt-side "Unsupported recipient format" rejection');
+
+    # (3) an all-lowercase identity still decrypts -- the /i on the
+    # identity side predates #19 and must stay untouched by it.
+    my $encrypted2 = Crypt::Age->encrypt(plaintext => $plaintext, recipients => [$public]);
+    my $decrypted2 = Crypt::Age->decrypt(ciphertext => $encrypted2, identities => [lc($secret)]);
+    is($decrypted2, $plaintext, 'an all-lowercase identity still decrypts');
+}
+
+# Ticket #22 regression, the version-line half: parse_from_fh's version
+# check used to interpolate the first line straight into the croak
+# ("Invalid age version: $version_line"). That is unbounded when the input
+# has no newline at all: parse_from_fh reads under `local $/ = "\n"`, so
+# with no newline to stop at, <$fh> reads to EOF and the *entire* input
+# becomes "the first line". Feed decrypt a plaintext string with no
+# trailing newline that cannot possibly be a real age header, and confirm
+# none of it survives into the error.
+{
+    my ($public, $secret) = Crypt::Age->generate_keypair;
+    my $not_an_age_file = 'this is definitely not an age header and has no newline at all';
+    ok(index($not_an_age_file, "\n") == -1, 'fixture: input contains no newline');
+
+    my $err = do {
+        local $@;
+        eval { Crypt::Age->decrypt(ciphertext => $not_an_age_file, identities => [$secret]) };
+        $@;
+    };
+
+    ok($err, 'decrypting a no-newline non-age input dies');
+    like($err,
+        qr/^Invalid age version: expected the literal age-encryption\.org\/v1 version line/,
+        'the message names the expected literal version line');
+    ok(index($err, $not_an_age_file) == -1,
+        'none of the input content appears in the error');
+}
+
 done_testing;

@@ -131,8 +131,31 @@ The binaries differ on the case they accept for a *key type*, which is a separat
 question from the mixed-case rule and deliberately not mirrored here: `age` 1.2.1
 dispatches on the literal prefix, so it rejects an all-upper `AGE1...` recipient
 ("unknown recipient type") and an all-lower identity ("unknown identity type"); `rage`
-0.12.1 accepts both. `Keys::decode_*` compares the HRP with `lc`, so it is as permissive
-as `rage`. Both binaries reject mixed case outright.
+0.12.1 accepts both. Both binaries reject mixed case outright.
+
+This distribution follows `rage`, and it does so on **both** paths — say which path when
+you make a claim here, because the two used to disagree and that is what hid the bug in
+`Header::create`:
+
+| Path | Dispatch | Decode |
+|---|---|---|
+| encrypt | `Header::create`, `/^age1/i` | `Keys::decode_public_key`, HRP compared with `lc` |
+| decrypt | `Header::unwrap_file_key`, `/^AGE-SECRET-KEY-1/i` | `Keys::decode_secret_key`, HRP compared with `lc` |
+
+So an all-upper `AGE1...` recipient encrypts and an all-lower `age-secret-key-1...`
+identity decrypts, both the way `rage` takes them; a mixed-case string of either kind
+passes the prefix test and then dies in `bech32_decode` with `Invalid bech32: mixed
+case`. Until ticket #19 the recipient dispatch alone was case-sensitive, so
+`decode_public_key(uc $pub)` returned the right bytes while `encrypt` died with
+`Unsupported recipient format` — do not re-narrow either regex to "match the binary",
+and note that `age`'s refusal is strictness beyond the spec, not our standard.
+
+None of this reaches the wire. The recipient string is decoded to raw bytes in
+`Stanza::X25519::wrap` and the stanza carries the *ephemeral* public key, so a file
+encrypted to `AGE1...` is byte-identical to the same file encrypted to `age1...`, and
+`age` 1.2.1 reads both — even though it would not have accepted `AGE1...` as its own
+`-r` argument. Generated keys stay canonical: `encode_public_key` is lowercase,
+`encode_secret_key` uppercase.
 
 ## Proof — a green suite is not one
 
