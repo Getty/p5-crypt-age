@@ -1,0 +1,37 @@
+---
+claimed_at: 2026-08-20T14:12:08Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T14:12:08Z
+created: 2026-08-20T13:42:16Z
+id: 19
+priority: high
+started: 2026-08-20T13:42:56Z
+status: done
+tags:
+- spec
+- keys
+- header
+title: Header::create rejects an all-uppercase age1 recipient
+updated: 2026-08-20T14:12:08Z
+---
+
+Header.pm:99 dispatches with `if ($recipient =~ /^age1/)` -- case-sensitive, no /i. Its identity counterpart at Header.pm:439 is `$identity =~ /^AGE-SECRET-KEY-1/i` and DOES have /i. So the two halves of the same module disagree.
+
+Consequence, verified end to end: `Keys::decode_public_key(uc $pub)` accepts the key and returns the right bytes, but `Crypt::Age->encrypt(recipients => [uc $pub])` dies with "Unsupported recipient format: AGE1...". Decrypting with an all-lowercase identity works. So the read side keeps the promise, the write side does not.
+
+BIP-173 defines the all-uppercase form as the same valid encoding of the same string, and rage 0.12.1 accepts it. (age 1.2.1 rejects it -- it dispatches on the literal prefix and is stricter than the spec here. That is age deviating, not us.)
+
+Also wrong because of this: .claude/skills/crypt-age-core/SKILL.md, updated in 35e4a03, states flatly that "Keys::decode_* compares the HRP with lc, so it is as permissive as rage". True of decode_* in isolation, false of the encrypt path. The skill text has to be corrected together with the code, or it will mislead the next agent.
+
+Wanted: /i on the recipient dispatch, so the module is symmetric with its own identity half and with its own documentation. NOT the other direction -- removing /i from the identity side would break all-lowercase identities that work today. A mixed-case recipient must keep dying, which it does: it passes the prefix test and then hits the mixed-case guard in bech32_decode.
+
+Found by the release-checker audit, not by the test suite -- t/01-keys.t:99-110 tests decode_public_key(uc(...)) in isolation and never drives it through Header::create, which is exactly the gap that hid this.
+2026-08-20 13:49 Implemented. Header.pm:104 is now if ($recipient =~ /^age1/i), with a comment saying why, and the =method create POD in the same file states what is accepted and rejected. .claude/skills/crypt-age-core/SKILL.md '## Keys' replaced the 'decode_* is as permissive as rage' half-truth with a per-path table covering encrypt and decrypt, the mixed-case outcome, and the note that recipient case never reaches the wire.
+
+Verified: (1) mixed case dies with 'Invalid bech32: mixed case', croaked from Keys.pm:273 -- the only place in lib that emits it -- reported at X25519.pm:146, i.e. it passed the prefix test and hit the guard; the guard also fires ahead of the checksum, since a mixed-case string with a corrupted checksum still reports mixed case while an all-upper one reports 'Invalid bech32 checksum'. (2) a non-age recipient still gets 'Unsupported recipient format'. (3) with the CSPRNG pinned, the ciphertext from the lowercase and the uppercase form of one key is byte-identical (same SHA-256), the recipient string appears in neither header, keypair generation is still lowercase, and age 1.2.1 and rage 0.12.1 both decrypt a file this library wrote for an uppercase recipient. Our reader also decrypts a file rage wrote for an AGE1 recipient.
+
+prove -lr t/: 8 files, 505 tests, PASS, nothing skipped; testkit 68 run / 75 skipped as designed. prove -lv t/04-interop.t: ran, did not skip -- 120 tests, 60 [age] 1.2.1 and 60 [rage] 0.12.1.
+
+Not done here, by instruction: tests (#20, note appended with the expectations), Changes, README.md and the Crypt::Age SYNOPSIS (#21). Raised #22 for the secret-key leak in the croak this dispatch falls through to.
+Fixed in 6f486f1: /^age1/i on the recipient dispatch. Wire format verified unchanged with the CSPRNG pinned -- both spellings give byte-identical ciphertext; age and rage both decrypt what we write for an uppercase recipient. Regression tests in t/02-encrypt-decrypt.t pin that mixed case dies in the bech32 guard, not the prefix test.
