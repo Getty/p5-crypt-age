@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-08-20T13:51:15Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T13:51:10Z
+created: 2026-08-20T13:42:43Z
+id: 21
+priority: low
+started: 2026-08-20T13:43:00Z
+status: done
+tags:
+- docs
+title: SYNOPSIS shows a public and a secret key that are not a pair
+updated: 2026-08-20T13:51:15Z
+---
+
+README.md:12-13 and the SYNOPSIS of lib/Crypt/Age.pm present both example keys as the return of a single generate_keypair() call. Each string is valid Bech32 on its own -- that was the 35e4a03 fix -- but they do not belong together.
+
+Verified: deriving the public key from the documented secret key
+  AGE-SECRET-KEY-1QQQ...8H00W3
+yields
+  age19ljhmg68e43yx9fgm2k9lwefquc0la5y4lzvlshdjzv47kxt8d6qr9vf4p
+while the documented public key is
+  age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+
+Anyone copying both out of the SYNOPSIS to try encrypt/decrypt against each other gets "No matching identity found" and has no way to tell the example is at fault.
+
+Wanted: replace the public key with the one actually derived from the documented secret key, in both README.md and the Crypt::Age SYNOPSIS. Keep the all-Q secret key -- its shape marks it as a placeholder rather than a usable identity, which is the right signal for documentation.
+Fixed in the working tree: SYNOPSIS and KEY FORMAT in both README.md and lib/Crypt/Age.pm now carry the public key actually derived from the documented secret key (age19ljhmg...). Verified: the old mismatched key is gone from the whole tree, and encrypt/decrypt with exactly the documented values round-trips.
