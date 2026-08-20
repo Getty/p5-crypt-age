@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-08-20T14:12:12Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T14:12:12Z
+created: 2026-08-20T13:42:38Z
+id: 20
+priority: medium
+started: 2026-08-20T14:00:31Z
+status: done
+tags:
+- tests
+title: Documented error paths have no test coverage
+updated: 2026-08-20T14:12:12Z
+---
+
+Three croaks are documented in POD as the behaviour a caller can rely on, and no test in t/ asserts any of them. Verified by grep over t/ -- no match for any of the three messages.
+
+- Header.pm:102 "Unsupported recipient format: $recipient" -- the encrypt-side rejection, documented in the LIMITATIONS section of Crypt::Age as what you get for a non-age1 recipient.
+- Keys.pm:101 "Invalid public key HRP: expected age, got ..." -- documented in decode_public_key.
+- Keys.pm:138 "Invalid secret key HRP" -- documented in decode_secret_key.
+
+The code was manually confirmed to behave as documented, so this is missing coverage, not a bug. It matters because these are the messages the POD promises: a future refactor could change or drop them and the suite would stay green.
+
+Note the overlap with #19 -- the recipient dispatch at Header.pm:99 is the line that produces the first of these, and #19 changes it. Write the coverage for that one AFTER #19 lands, so it asserts the corrected behaviour: uppercase accepted, mixed-case and non-age1 rejected.
+#19 has landed: Header.pm:104 is now /^age1/i, the croak moved to Header.pm:107. Behaviour to assert for the first of the three messages, all verified by hand against age 1.2.1 and rage 0.12.1: (1) an all-uppercase AGE1... recipient encrypts and the ciphertext decrypts with the matching identity; (2) a mixed-case recipient dies with 'Invalid bech32: mixed case' -- NOT 'Unsupported recipient format', since it now passes the prefix test and is caught by the bech32_decode guard; (3) a non-age string still dies with 'Unsupported recipient format'; (4) with the CSPRNG pinned, the ciphertext produced from the lowercase and the uppercase form of the same key is byte-identical, and neither form of the string occurs in the header.
+Done in 6f486f1: coverage in t/01-keys.t (both HRP mismatches), t/02-encrypt-decrypt.t (#19 round trip, version-line leak) and t/03-header.t (recipient index and identity hint). Counter-checked per group; the Keys.pm group was verified against a mutated copy via an -I overlay, since lib/ carried no diff to stash.
