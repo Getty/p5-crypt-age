@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-08-20T04:05:22Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T04:05:22Z
+created: 2026-08-20T00:41:12Z
+id: 18
+priority: low
+started: 2026-08-20T03:54:01Z
+status: done
+tags:
+- cleanup
+- header
+title: Stanza::to_bytes_for_mac is dead code with a misleading name
+updated: 2026-08-20T04:05:22Z
+---
+
+Crypt::Age::Stanza::to_bytes_for_mac returns to_string . "\n" and is called from nowhere in the distribution (grep over lib/ and t/ finds only its own definition and POD). Its name and old comment claim it is how a stanza is serialized for the MAC, which is not true in either direction:
+
+- Header::create re-serializes stanzas through Stanza::to_string when building _bytes.
+- Header::parse_from_fh MACs the literal header bytes it read, not a re-serialization at all.
+
+That read/write asymmetry is the most delicate invariant in this codebase, and a dead method whose name asserts something false about it sits directly next to it. A future edit that "uses the obvious helper" would silently change what gets MACed on the write side.
+
+Crypt::Age::Stanza::encode_body_base64 is likewise uncalled (to_string encodes and wraps the body itself), though its name claims nothing false.
+
+Wanted: remove to_bytes_for_mac, or give it a name and a caller that match reality. Decide the same for encode_body_base64. Both are documented as uncalled in POD right now; that POD goes with them.
+Implemented in 35e4a03: to_bytes_for_mac and encode_body_base64 removed, 38 deletions and nothing added. No caller in lib/, t/ or the history (git log -S). to_string byte-identical; encode_base64_no_padding kept, it has real callers. No test coverage lost -- t/06-stanza.t only ever used the free function.
