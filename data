@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-08-20T04:05:17Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T04:05:17Z
+created: 2026-08-20T00:41:08Z
+id: 17
+priority: medium
+started: 2026-08-20T03:53:56Z
+status: done
+tags:
+- spec
+- keys
+title: Keys::bech32_decode accepts mixed-case strings
+updated: 2026-08-20T04:05:17Z
+---
+
+BIP-173, and therefore the age key encoding, requires a Bech32 string to be entirely uppercase or entirely lowercase. Crypt::Age::Keys::bech32_decode enforces neither: it lowercases the data part unconditionally and verifies the checksum against lc($hrp), so a mixed-case string decodes successfully.
+
+Confirmed by mutating one character of a valid age1 public key to uppercase: decode_public_key returns 32 bytes instead of dying. decode_secret_key has the same leniency.
+
+Known (skill crypt-age-core already records it under Keys), but currently undocumented in POD terms only -- the doc pass added an explicit statement of the current behaviour to bech32_decode, decode_public_key and decode_secret_key rather than implying it is fixed. That statement has to be replaced with the rejection when this is closed.
+
+Wanted: reject a string that mixes cases, with a regression test for both key types and for a string that is validly all-upper and validly all-lower. Check the C2SP spec section on the Bech32 encoding first -- age removes the 90-character length limit but not the case rule.
+2026-08-20 03:59 Implemented in lib/Crypt/Age/Keys.pm.
+
+Spec verified first-hand: c2sp.org/age says "Bech32 is as specified in [BIP173], but without length limits on the data part. Note that Bech32 strings can only be all uppercase or all lowercase, but the checksum is always computed over the lowercase string." BIP-173: "Decoders MUST NOT accept strings where some characters are uppercase and some are lowercase." So age lifts the 90-char limit but not the case rule, as the ticket said.
+
+Measured against both binaries on PATH (age 1.2.1, rage 0.12.1): BOTH reject a mixed-case recipient and a mixed-case identity. age names it exactly ("malformed recipient: mixed case" / "malformed secret key: mixed case"). Unanimous, so no interop risk in tightening.
+
+They differ on something adjacent that I deliberately did NOT change: age dispatches on the literal prefix and so rejects an all-upper AGE1... recipient and an all-lower identity; rage accepts both, and so do we (decode_* compares the HRP with lc). Out of scope for this ticket, and the ticket requires all-upper and all-lower to keep working.
+
+Change: bech32_decode croaks "Invalid bech32: mixed case" when the string contains both [a-z] and [A-Z]. Checked first, before the separator search, matching BIP-173s reference decoder. POD for bech32_decode, decode_public_key and decode_secret_key rewritten -- the explicit statements of the old leniency are gone, replaced by the rejection.
+
+Both pitfalls checked, neither collides:
+- Header::unwrap_file_key /^AGE-SECRET-KEY-1/i is a prefix filter, not a validity check. decode_secret_key already sits OUTSIDE the narrow eval in X25519::unwrap (that eval only swallows the AEAD failure), so a malformed identity was already fatal there -- bad checksum, wrong HRP, wrong length. This adds one more reason to that existing set, which is also what age does (it refuses to load the identity file at all). Leaving the /i alone is required: narrowing it would break the all-lower identity that rage accepts.
+- t/07-testkit.t: all identities across the 143 vectors are all-uppercase (2 unique, both AGE-SECRET-KEY-1...). No mixed-case identity in the kit. 68 run / 68 pass before AND after, unchanged.
+
+prove -lr t/: 493 tests, PASS, identical to baseline. t/04-interop.t RAN (not skipped): 120 tests, 60 each against age 1.2.1 and rage 0.12.1.
+
+Handing to review rather than done: the regression test this ticket asks for is crypt-age-test-writer half. Test surface wanted -- mixed-case public key, mixed-case secret key, all-upper public, all-lower secret, and BIP-173 vectors a12UEL5L / A12uel5l; error text to match is qr/Invalid bech32: mixed case/.
+
+Also corrected the now-false claim in skill crypt-age-core (Keys section) that decode_* does not reject mixed case. Changes not touched, per instruction.
+Implemented in 35e4a03: guard in bech32_decode before the separator search, croaking 'Invalid bech32: mixed case'. Spec verified against BIP-173 and c2sp.org/age; age 1.2.1 and rage 0.12.1 both reject mixed case, so no interop risk. POD of bech32_decode/decode_public_key/decode_secret_key rewritten from the old leniency statement to the rejection. Regression tests in t/01-keys.t counter-checked: with the fix stashed exactly 4 assertions fail.
