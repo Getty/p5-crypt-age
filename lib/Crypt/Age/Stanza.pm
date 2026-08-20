@@ -95,21 +95,6 @@ This is base64-encoded when serialized to the age file format.
 
 =cut
 
-sub encode_body_base64 {
-    my ($self) = @_;
-    return encode_base64_no_padding($self->body);
-}
-
-=method encode_body_base64
-
-    my $encoded = $stanza->encode_body_base64;
-
-Returns L</body> encoded as unpadded base64, via L</encode_base64_no_padding>.
-Not currently called anywhere in this distribution -- L</to_string> encodes and
-line-wraps the body itself rather than going through this method.
-
-=cut
-
 sub encode_base64_no_padding {
     my ($data) = @_;
     my $encoded = encode_base64($data, '');
@@ -181,29 +166,6 @@ base64-encoded body wrapped at 64 characters per line.
 The last body line is always shorter than 64 characters, as the format requires.
 A body whose base64 encoding is an exact multiple of 64 characters is therefore
 followed by an empty final line, and the returned string ends in a newline.
-
-=cut
-
-sub to_bytes_for_mac {
-    my ($self) = @_;
-    # For MAC computation, stanzas are serialized as in the header
-    return $self->to_string . "\n";
-}
-
-=method to_bytes_for_mac
-
-    my $bytes = $stanza->to_bytes_for_mac;
-
-Returns L</to_string> with C<"\n"> appended.
-
-Despite the name, this is B<not> what computes the header MAC in either
-direction: L<Crypt::Age::Header/create> re-serializes every stanza through
-L</to_string> itself when building the bytes it MACs, and
-L<Crypt::Age::Header/parse_from_fh> MACs the literal bytes it read from the
-file, not a re-serialization at all. This method is not called anywhere in
-this distribution; do not take its name as a description of how the header
-MAC is actually computed -- see L<Crypt::Age::Header/verify_mac> and its
-C<_bytes> attribute for that.
 
 =cut
 

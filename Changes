@@ -30,10 +30,24 @@ Revision history for Crypt-Age
     the ephemeral_public attribute claimed to be set on every stanza when the
     parse path leaves it undef; and the filehandle methods claimed to die on
     "file not found", which they cannot, since they open no files.
-  - paranoid_read, bech32_encode and bech32_decode are documented, and the
-    uncalled Stanza methods encode_body_base64 and to_bytes_for_mac say so --
-    the latter explicitly, since its name asserts a role in the header MAC that
-    it does not have in either direction.
+  - paranoid_read, bech32_encode and bech32_decode are documented.
+  - Crypt::Age::Keys::bech32_decode now rejects a string that mixes upper- and
+    lowercase, dying with "Invalid bech32: mixed case" before it even looks for
+    the separator. BIP-173 requires this of decoders and c2sp.org/age repeats it
+    for the key encoding; the checksum is computed over the lowercase form
+    regardless, so a mixed-case key previously verified and decoded. age 1.2.1
+    and rage 0.12.1 both reject such a string, so this closes a gap rather than
+    tightening past them. All-uppercase and all-lowercase forms both still
+    decode, and to the same bytes.
+  - Crypt::Age::Stanza::to_bytes_for_mac and encode_body_base64 are removed.
+    Neither was called anywhere in the distribution, and both were traps for a
+    future caller: to_bytes_for_mac's name asserts a role in the header MAC that
+    it has in neither direction -- Header::create re-serializes through
+    to_string, Header::parse_from_fh MACs the literal bytes it read -- while
+    encode_body_base64 returned the body unwrapped, which only coincides with
+    the wire format because an X25519 body encodes to 43 characters and so never
+    reaches to_string's 64-column wrap. The free function encode_base64_no_padding,
+    which both delegated to and which to_string uses, is unchanged.
 
 0.002     2026-08-19 22:50:05Z
   - The distribution now carries the upstream age test kit: 143 vectors from

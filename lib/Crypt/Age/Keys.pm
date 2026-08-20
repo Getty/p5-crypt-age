@@ -110,8 +110,9 @@ sub decode_public_key {
 
 Decodes a Bech32-encoded age public key to raw bytes.
 
-Dies if the HRP is not C<age> or if the decoded data is not 32 bytes. Does not
-reject a string that mixes upper- and lowercase; see L</bech32_decode>.
+Dies if the HRP is not C<age>, if the decoded data is not 32 bytes, or if the
+string mixes upper- and lowercase; see L</bech32_decode>. The HRP is compared
+case-insensitively, so an all-uppercase C<AGE1...> key is accepted as well.
 
 =cut
 
@@ -146,9 +147,10 @@ sub decode_secret_key {
 
 Decodes a Bech32-encoded age secret key to raw bytes.
 
-Dies if the HRP is not C<age-secret-key-> or if the decoded data is not 32
-bytes. Does not reject a string that mixes upper- and lowercase; see
-L</bech32_decode>.
+Dies if the HRP is not C<age-secret-key->, if the decoded data is not 32 bytes,
+or if the string mixes upper- and lowercase; see L</bech32_decode>. The HRP is
+compared case-insensitively, so an all-lowercase C<age-secret-key-1...> key is
+accepted as well as the uppercase form L</encode_secret_key> emits.
 
 =cut
 
@@ -264,6 +266,13 @@ the 32-byte key length that this method does not.
 sub bech32_decode {
     my ($class, $str) = @_;
 
+    # BIP-173: "Decoders MUST NOT accept strings where some characters are
+    # uppercase and some are lowercase". The checksum is computed over the
+    # lowercase form either way, so a mixed-case string would otherwise verify
+    # and decode; both age 1.2.1 and rage 0.12.1 reject it.
+    croak "Invalid bech32: mixed case"
+        if $str =~ /[a-z]/ && $str =~ /[A-Z]/;
+
     # Find separator
     my $sep_pos = rindex($str, '1');
     croak "Invalid bech32: no separator" if $sep_pos < 1;
@@ -305,10 +314,14 @@ length.
 
 Dies if there is no C<1> separator, if the data part is empty, if it contains a
 character outside the Bech32 charset, or if the checksum does not verify.
+
 BIP-173 also requires an encoding to be entirely uppercase or entirely
-lowercase; this method does not enforce that -- it lowercases the data part
-unconditionally before decoding and verifies the checksum against the
-lowercased HRP, so a string that mixes cases is accepted rather than rejected.
+lowercase, and this method enforces that: a string mixing the two dies with
+C<Invalid bech32: mixed case> before the separator is even looked for. An
+all-uppercase and an all-lowercase string are both accepted, and decode to the
+same bytes -- the checksum is verified against the lowercased HRP, since
+BIP-173 defines it over the lowercase form regardless of how the string is
+written.
 
 =cut
 

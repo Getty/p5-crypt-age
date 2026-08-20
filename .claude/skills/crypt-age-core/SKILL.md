@@ -122,8 +122,17 @@ HRP `age` for recipients (lowercase output), `age-secret-key-` for identities
 The checksum is always computed over the lowercase form, which is why `bech32_decode`
 lowercases the HRP before verifying.
 
-`Keys::decode_*` does not reject mixed-case strings; the spec allows all-upper or
-all-lower only.
+`bech32_decode` rejects a string that mixes cases (`Invalid bech32: mixed case`), per
+BIP-173's "Decoders MUST NOT accept strings where some characters are uppercase and
+some are lowercase" — checked first, before the separator. All-upper and all-lower both
+decode, and to the same bytes.
+
+The binaries differ on the case they accept for a *key type*, which is a separate
+question from the mixed-case rule and deliberately not mirrored here: `age` 1.2.1
+dispatches on the literal prefix, so it rejects an all-upper `AGE1...` recipient
+("unknown recipient type") and an all-lower identity ("unknown identity type"); `rage`
+0.12.1 accepts both. `Keys::decode_*` compares the HRP with `lc`, so it is as permissive
+as `rage`. Both binaries reject mixed case outright.
 
 ## Proof — a green suite is not one
 
