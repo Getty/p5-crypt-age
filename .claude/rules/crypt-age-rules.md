@@ -68,8 +68,9 @@ prove -lv t/07-testkit.t   # 143 upstream vectors; no binary needed
 prove -lv t/04-interop.t   # the real binary; skips when neither age nor rage is on PATH
 ```
 
-The file resolves `age || rage`, so with both installed only `age` runs. For the Rust
-side, run it again with `age` hidden from `PATH`.
+The file runs its whole block once per CLI found, so with both installed it reports 120
+tests (60 each), tagged `[age]` / `[rage]`. A count of 60 means only one implementation
+was exercised — say which.
 
 Self-consistency is the failure mode, not the safety net: this library decrypting its
 own output proves nothing about what `age` will accept.

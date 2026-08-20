@@ -135,15 +135,19 @@ prove -lv t/04-interop.t        # the real binary, when there is one
 
 **Never assume whether a binary is present — check, with `which age rage`.** Machines
 differ and this skill ships inside the tarball, so any claim here about what is installed
-would be wrong somewhere. `t/04-interop.t` resolves the CLI as `which age`, falling back
-to `which rage`, and `plan skip_all`s when neither exists. Two consequences:
+would be wrong somewhere. `t/04-interop.t` collects every CLI it finds — `age` and `rage`
+— and runs the whole block once per CLI, prefixing each description with `[age]` /
+`[rage]`; it `plan skip_all`s only when neither exists. Consequences:
 
 - With no binary the file asserts **nothing**, and a green suite is not evidence for a
   format-touching change on its own.
-- The fallback is `age || rage`, not both — with both installed only `age` is ever
-  exercised. To cover the Rust side, run the file again with `age` hidden from `PATH`.
+- With both installed the count is **120** (60 per CLI); with one, 60. A run reporting 60
+  covered a single implementation, and the `Using CLI:` diag lines at the top name which.
+  No `PATH` surgery is needed to reach the Rust side any more.
+- The two differ observably: given a 0-byte plaintext and `-o`, `age` writes a 0-byte
+  file, `rage` writes no file at all. The chunk-boundary block handles both.
 
-Say which of the three commands you ran, and against which binary and version.
+Say which of the three commands you ran, and against which binaries and versions.
 
 `t/07-testkit.t` is what fills that hole: the C2SP/CCTV vectors, vendored under
 `t/testkit/`, 68 of 143 runnable against this implementation and 75 skipped with a
