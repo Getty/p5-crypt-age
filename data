@@ -1,0 +1,49 @@
+---
+claimed_at: 2026-08-20T14:12:17Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T14:12:17Z
+created: 2026-08-20T13:49:09Z
+id: 22
+priority: medium
+started: 2026-08-20T13:51:20Z
+status: done
+tags:
+- security
+- api
+title: Unsupported recipient format croak echoes the caller's string
+updated: 2026-08-20T14:12:17Z
+---
+
+Header.pm:107 croaks "Unsupported recipient format: $recipient", interpolating whatever the caller passed. A caller who swaps the argument order -- passing an identity where a recipient belongs -- gets the full secret key echoed into the exception, and from there into whatever logs the exception. The house rule is that keys and identities never appear in errors or logs, so this is a leak, not a nit.
+
+Observed while verifying #19: encrypt(recipients => [$secret_key]) dies with the whole AGE-SECRET-KEY-1... string in the message. Predates #19 and is unchanged by it -- an AGE-SECRET-KEY- string does not match /^age1/i either, so it still reaches this croak.
+
+Not fixed with #19 to keep that change to one line. Fixing it means deciding what the message says instead: the recipient's index in the array is enough to locate the bad entry, and a short non-secret discriminator (length, or the first few characters up to the bech32 separator) could be added if that is too thin.
+
+Two things to keep in mind when fixing:
+- Crypt::Age's LIMITATIONS POD quotes this message as the documented behaviour for a non-age1 recipient, so the POD changes with it.
+- #20 is scheduled to assert this exact message. Land the wording change before that coverage is written, or #20 pins the leaky form.
+
+Keys.pm:101/138 interpolate only the HRP, which for a bech32-charset string cannot contain key data (the charset has no '1', so the separator found by rindex is the real one). No change needed there.
+2026-08-20 13:58 Fixed. Header::create no longer interpolates the recipient string; the message is built from literals plus the array index.
+
+New wording, exact (both forms share the first clause):
+  Unsupported recipient format at index N: expected an age1 recipient
+  Unsupported recipient format at index N: expected an age1 recipient, got an AGE-SECRET-KEY-1 identity
+
+N is the 0-based position in the recipients array. The suffix is added when the string matches /^AGE-SECRET-KEY-1/i.
+
+Discriminator reasoning: the hint is a classification against a literal public format prefix, not a quotation -- no byte of the caller string is copied, so it carries one bit about a constant every age tutorial prints. The bech32-HRP idea from the ticket was tested and rejected: for a non-bech32 caller string, rindex($str,"1") is uncontrolled and echoes everything before the last "1" (a passphrase ending in a digit 1 would leak whole).
+
+Second leak of the same kind found by the sweep and fixed in the same change: parse_from_fh interpolated the first line of a non-age input into "Invalid age version: ...", which is unbounded -- an input with no newline at all put the entire content into the message. Now:
+  Invalid age version: expected the literal age-encryption.org/v1 version line
+
+POD updated in the same edit: Header::create and Crypt::Age LIMITATIONS. parse_from_fh POD already described the version check without quoting the message, so it needed no change.
+
+Sweep result: every croak/die in lib/ reviewed. Keys.pm:101/138 confirmed clean by measurement. Two residual findings filed as #23 (one character echoed by bech32_decode, bounded, cannot be key material) and #24 (bare die where croak belongs).
+
+prove -lr t/: 505 tests, PASS, nothing skipped. prove -lv t/04-interop.t: RAN, 120 tests against age 1.2.1 and rage 0.12.1 (60 each). Testkit 68 run / 0 fail / 75 skipped.
+
+Changes entry left to the orchestrator per instruction.
+Fixed in 6f486f1, and a second leak of the same class found in the sweep and fixed with it: Header::parse_from_fh echoed the input's first line, unbounded when the input has no newline. Both messages are now literals plus an integer. HRP and length discriminators were measured and rejected. Residual findings filed as #23 and #24.
