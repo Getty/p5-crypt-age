@@ -34,6 +34,8 @@ using Bech32, the same encoding used for Bitcoin SegWit addresses (BIP-173).
 Public keys use the human-readable part C<age> and are lowercase. Secret keys
 use the human-readable part C<age-secret-key-> and are uppercase.
 
+This is an internal module used by L<Crypt::Age>.
+
 =cut
 
 # Bech32 character set
@@ -108,7 +110,8 @@ sub decode_public_key {
 
 Decodes a Bech32-encoded age public key to raw bytes.
 
-Dies if the HRP is not C<age> or if the decoded data is not 32 bytes.
+Dies if the HRP is not C<age> or if the decoded data is not 32 bytes. Does not
+reject a string that mixes upper- and lowercase; see L</bech32_decode>.
 
 =cut
 
@@ -143,7 +146,9 @@ sub decode_secret_key {
 
 Decodes a Bech32-encoded age secret key to raw bytes.
 
-Dies if the HRP is not C<age-secret-key-> or if the decoded data is not 32 bytes.
+Dies if the HRP is not C<age-secret-key-> or if the decoded data is not 32
+bytes. Does not reject a string that mixes upper- and lowercase; see
+L</bech32_decode>.
 
 =cut
 
@@ -165,6 +170,17 @@ Derives the public key from a secret key.
 Takes a Bech32-encoded secret key and returns the corresponding Bech32-encoded
 public key. This is useful for when you have a secret key and need to know
 what public key it corresponds to.
+
+=cut
+
+=head1 IMPLEMENTATION NOTES
+
+C<bech32_polymod>, C<bech32_hrp_expand>, C<bech32_create_checksum> and
+C<bech32_verify_checksum> below implement the checksum algorithm from BIP-173.
+They are called only by L</bech32_encode> and L</bech32_decode> in this same
+class, as plain functions rather than through the C<< $class->method(...) >>
+convention the rest of this module uses, and are not documented individually
+here.
 
 =cut
 
@@ -230,6 +246,21 @@ sub bech32_encode {
     return $result;
 }
 
+=method bech32_encode
+
+    my $encoded = Crypt::Age::Keys->bech32_encode($hrp, $bytes);
+
+Encodes C<$bytes> as Bech32 (BIP-173) with the given human-readable part
+C<$hrp>: converts the bytes from 8-bit to 5-bit groups, computes the checksum,
+and joins C<$hrp>, the C<1> separator, the data and the checksum through the
+Bech32 charset.
+
+This is the generic codec L</encode_public_key> and L</encode_secret_key> call;
+most callers want those instead, since they also know the age HRPs and enforce
+the 32-byte key length that this method does not.
+
+=cut
+
 sub bech32_decode {
     my ($class, $str) = @_;
 
@@ -259,6 +290,27 @@ sub bech32_decode {
 
     return ($hrp, pack('C*', @$bytes));
 }
+
+=method bech32_decode
+
+    my ($hrp, $bytes) = Crypt::Age::Keys->bech32_decode($encoded);
+
+Decodes a Bech32 (BIP-173) string, verifying its checksum. Returns the
+human-readable part exactly as it appeared in C<$encoded> (not lowercased) and
+the decoded data as raw bytes.
+
+This is the generic codec L</decode_public_key> and L</decode_secret_key> call;
+most callers want those instead, since they also check the HRP and the decoded
+length.
+
+Dies if there is no C<1> separator, if the data part is empty, if it contains a
+character outside the Bech32 charset, or if the checksum does not verify.
+BIP-173 also requires an encoding to be entirely uppercase or entirely
+lowercase; this method does not enforce that -- it lowercases the data part
+unconditionally before decoding and verifies the checksum against the
+lowercased HRP, so a string that mixes cases is accepted rather than rejected.
+
+=cut
 
 sub _convert_bits {
     my ($class, $data, $from_bits, $to_bits, $pad) = @_;

@@ -30,7 +30,8 @@ use namespace::clean;
     my $unwrapped = Crypt::Age::Primitives->unwrap_file_key($wrap_key, $wrapped);
 
     # Payload encryption
-    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key);
+    my $nonce = Crypt::Age::Primitives->generate_payload_nonce();
+    my $payload_key = Crypt::Age::Primitives->derive_payload_key($file_key, $nonce);
     my $encrypted = Crypt::Age::Primitives->encrypt_payload($payload_key, $plaintext);
     my $decrypted = Crypt::Age::Primitives->decrypt_payload($payload_key, $encrypted);
 
@@ -341,14 +342,16 @@ sub encrypt_payload_fh {
 
 =method encrypt_payload_fh
 
-    my $ciphertext = Crypt::Age::Primitives->encrypt_payload_fh($payload_key, $ifh, $ofh);
+    Crypt::Age::Primitives->encrypt_payload_fh($payload_key, $ifh, $ofh);
 
-Encrypts the payload using ChaCha20-Poly1305 in chunked mode, using filehandles
-for both input and output.
+Encrypts the payload using ChaCha20-Poly1305 in chunked mode, reading the
+plaintext from C<$ifh> and writing the ciphertext to C<$ofh> one chunk at a
+time. Returns nothing -- unlike L</encrypt_payload>, the encrypted bytes are
+never assembled in memory, only written to C<$ofh> as each chunk is produced.
 
-The plaintext is split into 64 KiB chunks. Each chunk is encrypted with a unique
-nonce derived from a counter and a final-chunk flag. Returns the concatenated
-encrypted chunks.
+Input is read via L</paranoid_read> in 64 KiB chunks; a chunk is final when
+that read leaves the input handle at C<eof>. Each chunk is encrypted with a
+nonce derived from a counter and that final-chunk flag.
 
 =cut
 
@@ -523,6 +526,27 @@ sub paranoid_read {
     return $retval if $attempts > 0;
     croak "could not get requested data up to the end";
 }
+
+=method paranoid_read
+
+    my $bytes = Crypt::Age::Primitives->paranoid_read($fh, $length);
+
+Reads up to C<$length> bytes from C<$fh>, retrying a zero-byte C<read> that is
+not C<eof> -- as a pipe or socket can produce -- instead of treating it as the
+end of the data. Internal; used throughout this module and by
+L<Crypt::Age>'s streaming paths wherever a caller must not mistake a stalled
+read for a short file.
+
+A read that hits C<eof> before C<$length> bytes have accumulated is not an
+error: this is how the chunked STREAM readers and L<Crypt::Age>'s payload nonce
+read learn that the input ends there, so the return value can be shorter than
+C<$length>. It is the caller's job to decide whether that short length is
+expected (as C<encrypt_payload_fh>'s last chunk) or a truncated file (as
+C<decrypt_payload_fh> and L<Crypt::Age>'s 16-byte nonce read treat it). This
+method dies only when three consecutive reads return zero bytes without
+reaching C<eof>.
+
+=cut
 
 =head1 SEE ALSO
 

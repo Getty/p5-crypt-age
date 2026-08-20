@@ -36,6 +36,8 @@ secret and unwrap the file key.
 
 This is the primary recipient type for age encryption.
 
+This is an internal module used by L<Crypt::Age>.
+
 =cut
 
 extends 'Crypt::Age::Stanza';
@@ -52,7 +54,11 @@ has ephemeral_public => (
 
 The ephemeral X25519 public key used for this stanza (raw bytes).
 
-Generated randomly during wrapping.
+Only set on the encrypt path: L</wrap> generates it and passes it to the
+constructor. A stanza built by L<Crypt::Age::Header/parse_from_fh> on the
+decrypt path leaves this C<undef> -- the same key is present there too, but
+base64-encoded in the inherited C<args> attribute (C<args-E<gt>[0]>), which is
+what L</unwrap> decodes for itself rather than reading this attribute.
 
 =cut
 

@@ -1,6 +1,39 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - t/04-interop.t now runs its whole block once per CLI it finds instead of
+    resolving `age || rage` and exercising only the first. On a machine with
+    both installed it reports 120 assertions, 60 tagged [age] and 60 tagged
+    [rage], and names each binary and version up front; with one it reports 60,
+    and with neither it still skips. Verified against age 1.2.1 and rage 0.12.1.
+    A comment describing the 0-byte-plaintext case had the two implementations
+    backwards -- age writes an empty -o file, rage writes none -- and is
+    corrected; the code already handled both.
+  - The documented secret-key example was not a valid key. Both README.md and
+    the KEY FORMAT section of Crypt::Age carried a bech32 string whose checksum
+    does not verify, so anyone pasting it got "Invalid bech32 checksum" rather
+    than a working identity.
+  - Crypt::Age now documents what it does not implement -- scrypt (passphrase),
+    SSH and the post-quantum/tagged recipient types, and ASCII armor -- and
+    which error each produces, instead of leaving "compatible with age" to be
+    read as covering the whole format.
+  - The streaming decrypt methods now document that a failure does not undo what
+    was already written: decrypt_file and decrypt_filehandle release each chunk
+    as it authenticates, so plaintext is already in the caller's output when
+    they die on a truncated or corrupt payload. Each released chunk is
+    individually authentic; the message is not. Callers making a security
+    decision were given no way to know this from the POD before.
+  - Several POD claims that were false against the code are corrected: the
+    SYNOPSIS of Crypt::Age::Primitives called derive_payload_key without the
+    nonce it requires and died; encrypt_payload_fh claimed to return the
+    concatenated ciphertext when it returns nothing and writes to the handle;
+    the ephemeral_public attribute claimed to be set on every stanza when the
+    parse path leaves it undef; and the filehandle methods claimed to die on
+    "file not found", which they cannot, since they open no files.
+  - paranoid_read, bech32_encode and bech32_decode are documented, and the
+    uncalled Stanza methods encode_body_base64 and to_bytes_for_mac say so --
+    the latter explicitly, since its name asserts a role in the header MAC that
+    it does not have in either direction.
 
 0.002     2026-08-19 22:50:05Z
   - The distribution now carries the upstream age test kit: 143 vectors from

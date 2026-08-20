@@ -60,6 +60,15 @@ primitives are provided by L<CryptX>.
 Files encrypted with Crypt::Age can be decrypted with the C<age> and C<rage>
 command-line tools, and vice versa.
 
+Two APIs are provided, and they differ in memory use. L</encrypt> and
+L</decrypt> take and return in-memory strings, so the whole plaintext or
+ciphertext has to fit in memory at once, both as the argument and as the
+returned value. L</encrypt_file>, L</decrypt_file>, L</encrypt_filehandle> and
+L</decrypt_filehandle> stream instead: they read and write in 64 KiB chunks, so
+memory use stays bounded regardless of how large the file is.
+
+See L</LIMITATIONS> below for what this module does not implement.
+
 =cut
 
 our $VERSION = '0.003';
@@ -131,6 +140,10 @@ allowing any of them to decrypt the data.
 
 The returned data can be written to a file or transmitted directly.
 
+C<plaintext> and the returned ciphertext are both held in memory in full. For
+large data, use L</encrypt_file> or L</encrypt_filehandle>, which stream in 64
+KiB chunks instead.
+
 =cut
 
 sub decrypt {
@@ -173,6 +186,13 @@ Returns the decrypted plaintext.
 The method tries each identity against each recipient stanza in the header until
 one successfully unwraps the file key. Dies if no matching identity is found or
 if the MAC verification fails.
+
+C<ciphertext> and the returned plaintext are both held in memory in full. For
+large data, use L</decrypt_file> or L</decrypt_filehandle>, which stream in 64
+KiB chunks instead. Because this method never returns a value on failure, a
+decryption that dies here does not expose any partial plaintext to the caller
+-- contrast L</decrypt_filehandle>, which writes to a caller-supplied handle
+and so can leave an authenticated-but-incomplete prefix behind.
 
 =cut
 
@@ -243,6 +263,8 @@ The output file will be in age format and can be decrypted with the C<age> or
 C<rage> command-line tools.
 
 Returns C<1> on success. Dies on error (file not found, permission denied, etc).
+Reads and writes the file in 64 KiB chunks, so memory use does not grow with
+the size of the file.
 
 =cut
 
@@ -286,7 +308,14 @@ Both filehandles will be forced to be C<:raw> using C<binmode>.
 The output stream will be in age format and can be decrypted with the C<age> or
 C<rage> command-line tools.
 
-Returns C<1> on success. Dies on error (file not found, permission denied, etc).
+Returns C<1> on success. Dies if a required argument is missing, if
+C<recipients> is not a non-empty array ref, if a recipient string is not a
+valid Bech32 C<age1...> public key, or if C<binmode> fails on either handle.
+Unlike L</encrypt_file>, this method never opens or closes a file itself --
+C<input> and C<output> are handles the caller already has open -- so it cannot
+die with a "file not found" or "permission denied" error; that is the
+caller's concern before the handle is passed in. Streams in 64 KiB chunks, so
+memory use does not grow with the amount of data written.
 
 =cut
 
@@ -355,8 +384,18 @@ Parameters:
 
 =back
 
-Returns C<1> on success. Dies if no matching identity is found, if the MAC
-verification fails, or on file I/O errors.
+Returns C<1> on success. Dies if the header is invalid, if no identity matches
+any stanza, if the MAC verification fails, if payload authentication fails, or
+on file I/O errors.
+
+Reads the input and writes the output in 64 KiB chunks, so memory use does not
+grow with the size of the file. B<This means a failure does not undo what was
+already written>: every chunk that authenticated before the error is already
+in C<output> on disk once this method dies. Each such chunk is individually
+authentic, but the file as a whole is not -- that is exactly what the error
+reports. Treat a partial C<output> as undecrypted and discard it; do not rely
+on the bytes that made it out. See L<Crypt::Age::Primitives/decrypt_payload_fh>
+for the same guarantee stated at the primitive layer.
 
 =cut
 
@@ -394,8 +433,27 @@ Parameters:
 
 =back
 
-Returns C<1> on success. Dies if no matching identity is found, if the MAC
-verification fails, or on I/O errors.
+Both filehandles will be forced to be C<:raw> using C<binmode>.
+
+Returns C<1> on success. Dies if a required argument is missing, if the header
+is invalid, if no identity matches any stanza, if the MAC verification fails,
+if payload authentication fails, or if C<binmode> fails on either handle.
+Unlike L</decrypt_file>, this method never opens or closes a file itself --
+C<input> and C<output> are handles the caller already has open -- so it cannot
+die with a "file not found" or "permission denied" error; that is the
+caller's concern before the handle is passed in.
+
+Decryption streams: plaintext is written to C<output> one 64 KiB chunk at a
+time as each chunk authenticates, so memory use does not grow with the amount
+of data decrypted. B<This also means a failure does not undo what was already
+written.> If the payload is truncated or corrupt, every chunk that
+authenticated before the error is already in C<output> when this method dies;
+each of those chunks is individually authentic, but the message as a whole is
+not, which is exactly what the error reports. A caller must treat whatever
+reached C<output> as unauthenticated and discard it, rather than as a decrypted
+message merely because its individual bytes checked out. See
+L<Crypt::Age::Primitives/decrypt_payload_fh> for the same guarantee stated at
+the primitive layer.
 
 =cut
 
@@ -413,7 +471,7 @@ part C<age>:
 Secret keys are uppercase Bech32-encoded X25519 secret keys with the
 human-readable part C<AGE-SECRET-KEY->:
 
-    AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ3290DG
+    AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ8H00W3
 
 =head1 INTEROPERABILITY
 
@@ -428,6 +486,38 @@ This module is designed to be compatible with:
 =back
 
 Files encrypted with Crypt::Age can be decrypted with these tools and vice versa.
+
+=head1 LIMITATIONS
+
+Only the C<X25519> recipient type is implemented, and it is complete in both
+directions: keypair generation, header creation and parsing, wrapping and
+unwrapping, and the header MAC. Not implemented:
+
+=over 4
+
+=item * scrypt (passphrase) recipients
+
+=item * SSH recipients
+
+=item * the post-quantum and tagged recipient types (C<mlkem768x25519> and
+similar)
+
+=item * ASCII armor
+
+=back
+
+A stanza of one of these types is not rejected outright: the format requires
+unrecognized stanza types to be ignored, and this implementation does that (see
+L<Crypt::Age::Header/parse_from_fh>), so a file with both an C<X25519>
+recipient and, say, a C<scrypt> one still decrypts normally for an identity
+that matches the C<X25519> stanza. But a file whose recipients are all of
+these unsupported types dies: L</decrypt> and the other decrypt methods raise
+C<"No matching identity found">, since L<Crypt::Age::Header/unwrap_file_key>
+only tries stanzas it recognizes as C<X25519>. An armored file fails even
+earlier, because its first line is not the literal C<age-encryption.org/v1>
+version line that L<Crypt::Age::Header/parse_from_fh> requires. On the encrypt
+side, passing a recipient string that is not a Bech32 C<age1...> public key
+dies with C<"Unsupported recipient format">.
 
 =head1 SECURITY
 
@@ -456,6 +546,12 @@ final-chunk flag.
 =item * L<https://github.com/C2SP/C2SP/blob/main/age.md> - age format specification
 
 =item * L<CryptX> - Cryptographic toolkit providing all primitives
+
+=item * L<Crypt::Age::Header> - Header parsing, generation and the header MAC
+
+=item * L<Crypt::Age::Stanza> - Base recipient stanza class
+
+=item * L<Crypt::Age::Stanza::X25519> - X25519 recipient stanza
 
 =item * L<Crypt::Age::Keys> - Key generation and encoding
 
