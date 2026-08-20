@@ -1,0 +1,37 @@
+---
+claimed_at: 2026-08-20T14:26:24Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T14:26:24Z
+created: 2026-08-20T14:16:25Z
+id: 25
+priority: low
+started: 2026-08-20T14:16:38Z
+status: done
+tags:
+- api
+title: undef in recipients warns twice before the croak
+updated: 2026-08-20T14:26:24Z
+---
+
+Recorded on #24 while sweeping the error paths, not ticketed there.
+
+An undef entry in the recipients array produces two "Use of uninitialized value" warnings from Header::create before the croak fires. The croak itself is correct -- after #22 it reports the index -- but the warnings are noise emitted from library code, and they arrive before the message that actually explains the problem.
+
+Wanted: check definedness before the string operations, so an undef entry goes straight to the croak that names its index. Keep the message shape introduced in #22 (literals plus the index; no interpolation of caller data -- and note undef has nothing to interpolate anyway, so this is about warning noise, not about a leak).
+
+Same treatment for the identities array if it has the same hole -- check, do not assume.
+2026-08-20 14:23 Done in lib/Crypt/Age/Header.pm; regression tests appended to t/03-header.t.
+
+Recipients: definedness is tested before the /^age1/i match and before the hint match, so an undef entry goes straight to the croak. Message decision: NOT a separate message. ", got undef" fills the same "what arrived instead" slot the AGE-SECRET-KEY-1 hint already occupies, so the skeleton and the prefix stay one shape, existing matchers on the prefix keep working, and one croak statement keeps the variants from drifting. It names undef (the diagnostic value a dedicated message would have given) and is a classification, not caller data -- undef has nothing to interpolate.
+
+Identities: the hole exists but is NOT the same hole. It warned once per X25519 stanza, and the outcome was already correct, because a non-matching identity is skipped rather than fatal (unlike a recipient). So the fix is "next unless defined", which removes the warnings and preserves that contract exactly; making undef fatal there would be a behaviour change and out of scope.
+
+Checked and rejected as a second hole: an empty or undef recipients list never reaches Header::create -- the public API croaks with "at least one recipient required" / "recipients required" first.
+
+Counter-check against HEAD in an isolated lib copy: 6 of the new assertions fail, including all four is_deeply(\@warnings, []) ones with the real "Use of uninitialized value" lines in the diagnostic. The two behaviour-preserving identity assertions stayed green against the old code, which is the proof nothing changed there.
+
+prove -lr t/ 548 tests pass. t/04-interop.t RAN, did not skip: 120 assertions, 60 [age] 1.2.1 + 60 [rage] 0.12.1. Test kit unchanged, 68 of 143 run, 68 pass.
+
+Changes entry left to the maintainer as instructed. Follow-up filed as #27 (Crypt::Age.pm ERRORS POD).
+Fixed in HEAD: definedness checked before the string ops in create, next unless defined in unwrap_file_key. Verified: zero warnings for undef in either array, correct index, and an undef identity is still skipped without changing the outcome.
