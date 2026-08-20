@@ -1,0 +1,53 @@
+---
+claimed_at: 2026-08-20T15:53:49Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T15:53:49Z
+created: 2026-08-20T14:20:42Z
+id: 26
+priority: low
+started: 2026-08-20T15:36:50Z
+status: done
+tags:
+- api
+- docs
+title: encrypt/decrypt do not document that the string API takes bytes, not characters
+updated: 2026-08-20T15:53:49Z
+---
+
+Found while doing #24, not fixed there (one ticket, one change).
+
+The in-memory opens in Crypt::Age::encrypt/decrypt map the caller string into a filehandle. Perl refuses to map a string holding code points above 0xFF, so passing a decoded character string rather than bytes makes the input open return false and the method now croaks "open on input string: Invalid argument".
+
+That is a plausible caller mistake (encrypting a string that went through decode) and the message does not explain it -- EINVAL from an in-memory open gives the caller nothing to act on. Perl also emits its own "Strings with code points over 0xFF may not be mapped into in-memory file handles" warning just before it.
+
+Two separable pieces of work:
+  - POD: encrypt/decrypt say plaintext/ciphertext are held in memory in full but never say they must be byte strings. The file/filehandle paths have the same requirement via binmode :raw.
+  - Optionally a definedness/wideness check with a message that names the actual problem instead of passing EINVAL through.
+
+t/02-encrypt-decrypt.t already exercises this path as the #24 regression test, so the behaviour is pinned and any change here must keep the croak location pointing at the caller.
+2026-08-20 15:51 Done in lib/Crypt/Age.pm + t/02-encrypt-decrypt.t. Both parts of the ticket.
+
+Check: encrypt and decrypt run utf8::downgrade($str, 1) before the in-memory open and croak on failure.
+  encrypt: "plaintext must be a byte string: it holds a code point above 0xFF, encode it before passing it in"
+  decrypt: "ciphertext must be a byte string: it holds a code point above 0xFF, read it with :raw rather than decoding it"
+
+Why downgrade and not the alternatives, measured rather than assumed:
+  - utf8::is_utf8 is wrong, as the ticket said: it reports the internal representation. Counter-proof in the test file -- substituting it rejects an upgraded pure-ASCII string with the wide-character message.
+  - a /[^\x00-\xff]/ scan is correct but costs more. Both are free on an unflagged string (2000 passes over 16 MiB in under 0.01s CPU; perl short-circuits both). On a flagged 16 MiB string downgrade is 32ms against the regex 55ms, and downgrade IS the scan PerlIO::scalar is about to perform, so it leaves the string downgraded and perl repeat of it becomes a flag test. The regex pays for that scan twice. So the check adds no per-call cost to the common path and at worst hoists a pass perl was going to make.
+  - it returns one bit, which is all that may be reported anyway: an offset would be derived from caller plaintext.
+Mutating the copy is safe: %args and the lexical are both copies, downgrade converts representation and never value, and on success perl own open performs the same conversion.
+
+Output side: nothing to do. Both output opens write into a lexical the method owns through :raw and are not caller-reachable. Filehandle paths: nothing to do either -- binmode(:raw) was measured to pop an :encoding layer (unix perlio encoding(utf-8-strict) utf8 -> unix perlio), so a handle delivers octets by the time it is read.
+
+POD: DESCRIPTION gained a byte-oriented paragraph covering all six methods; =method encrypt gained the byte-string requirement, an Encode example, the new message, and the honest limit (a character string that fits in a byte is NOT caught -- it encrypts as Latin-1); =method decrypt the same plus the returned plaintext being bytes; both filehandle methods now say what binmode(:raw) does to the caller layers.
+
+#24 claim preserved: the four location assertions still assert the croak points at the caller, not at Crypt/Age.pm.
+
+Tests: t/02-encrypt-decrypt.t 42 -> 68. Counter-proofs all verified to fail when the fix is reverted -- check removed (3 fail), check moved after the open (3 fail, incl. the no-warning assertion), utf8::is_utf8 substituted (aborts on upgraded ASCII).
+
+prove -lr t/: 574 tests, 8 files, PASS.
+prove -lv t/04-interop.t: RAN, 120 tests (60 age 1.2.1 + 60 rage 0.12.1), PASS.
+dzil test: PASS incl. author-pod-syntax on the woven POD.
+
+Changes entry still to write (left to the maintainer as instructed). Follow-up filed as #28 (same defect untreated in Primitives::encrypt_payload/decrypt_payload).
