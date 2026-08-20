@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-08-20T14:26:15Z
+claimed_by: plus-cast
+class: standard
+completed: 2026-08-20T14:26:15Z
+created: 2026-08-20T13:58:22Z
+id: 23
+priority: low
+started: 2026-08-20T14:16:29Z
+status: done
+tags:
+- security
+- api
+title: bech32_decode echoes one character of the caller's string
+updated: 2026-08-20T14:26:15Z
+---
+
+Sweep finding from #22, deliberately NOT folded into that change.
+
+Keys.pm:287 croaks "Invalid bech32 character: $c", where $c is one character of the caller string (lowercased, taken from the data part after the separator). Reachable through the documented public Keys API -- bech32_decode / decode_public_key / decode_secret_key accept any string.
+
+Why this is bounded and not the #22 defect:
+- It fires only for a character OUTSIDE the bech32 charset. Every character of an encoded age key, public or secret, is inside that charset, so no character of a key or identity can ever reach this croak. Verified empirically.
+- The two callers inside this distribution gate on a prefix first (Header::create on /^age1/i, Header::unwrap_file_key on /^AGE-SECRET-KEY-1/i), so nothing but a key-shaped string reaches bech32_decode from the encrypt/decrypt paths.
+- What can leak is exactly one character of some other secret a caller hands to the public Keys API directly -- a passphrase, say. One character, and specifically one that cannot be part of any age key.
+
+Suggested fix if we want it closed: report the offset instead of the character ("Invalid bech32 character at offset N"), which keeps the whole diagnostic value and copies no byte. Left open as a judgement call because the character is the entire diagnostic of that message.
+
+Keys.pm:101/138 were checked in the same sweep and are clean: the HRP is returned only after the checksum verifies, and the bech32 charset has no "1", so everything after rindex($str,"1") is data+checksum and the HRP is the format type prefix. Confirmed by measurement -- decode_public_key on a secret key reports only "AGE-SECRET-KEY-".
+Fixed in HEAD: reports a 0-based offset into the caller's string instead of the character. Verified: offset lands exactly on the offending character, and neither it nor a passphrase fragment appears in the message.
