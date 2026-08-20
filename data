@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-08-20T00:28:09Z
+claimed_by: main
+class: standard
+completed: 2026-08-20T00:28:09Z
+created: 2026-08-19T20:57:42Z
+id: 16
+priority: medium
+started: 2026-08-20T00:21:49Z
+status: done
+tags:
+- interop
+- tests
+title: Exercise both age and rage in t/04-interop.t
+updated: 2026-08-20T00:28:09Z
+---
+
+The file resolves the CLI once as `my $cli_bin = $age_bin || $rage_bin;` (t/04-interop.t:19). With both binaries installed only `age` ever runs, so the Rust implementation is silently never exercised — and the file gives no hint that it skipped half the coverage.
+
+Both are now installed on this machine: age 1.2.1 and rage 0.12.1 in ~/.local/bin. Verified today that all 60 assertions pass against each, but the rage run needed PATH surgery to hide `age`.
+
+Wanted: run the block against every CLI found rather than the first, and diag() which ones ran. Keep the existing plan skip_all when none is present.
+Implemented: t/04-interop.t now collects every CLI found and runs the whole block once per CLI, each assertion tagged [age]/[rage], with per-CLI tempdirs so fixed fixture names cannot collide. diag() names each binary and its version. skip_all preserved for the no-binary case.
+
+Verified independently by the orchestrator: prove -lv t/04-interop.t -> 120 tests, ok 1-60 [age] 1.2.1, ok 61-120 [rage] 0.12.1, Result: PASS. PATH with rage only -> 60 tests PASS. PATH with neither -> skip_all, NOTESTS.
+
+Also corrected an inverted comment: for a 0-byte plaintext with -o, age(1) DOES create the file (0 bytes) and rage creates none - the old comment claimed the opposite. Verified directly against both binaries; the existing -e guard already handled both, logic unchanged.
+
+Same pass: the stale 'age || rage, only age runs' claims in skill crypt-age-core and .claude/rules/crypt-age-rules.md updated, README Testing section now states the 120/60 split.
