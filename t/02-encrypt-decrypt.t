@@ -339,4 +339,54 @@ use Crypt::Age::Header;
         'none of the input content appears in the error');
 }
 
+# Ticket #24 regression: the in-memory filehandle opens in encrypt/decrypt
+# used a bare `die`, so a failure there blamed Crypt/Age.pm instead of the
+# caller. They croak now. Reaching them needs no mocking: perl refuses to
+# map a string holding code points above 0xFF into an in-memory handle, so
+# handing the string API a character (decoded) string rather than bytes
+# makes the *input* open return false with $! set. The output-side opens
+# (on a lexical the method owns) have no caller-reachable failure and are
+# deliberately not covered here.
+{
+    my ($public, $secret) = Crypt::Age->generate_keypair;
+    my $wide = "\x{100} not bytes";
+
+    my ($enc_err, $enc_line);
+    {
+        # perl warns about the >0xFF mapping before open returns false.
+        local $SIG{__WARN__} = sub {};
+        local $@;
+        $enc_line = __LINE__ + 1;
+        eval { Crypt::Age->encrypt(plaintext => $wide, recipients => [$public]) };
+        $enc_err = $@;
+    }
+
+    ok($enc_err, 'encrypt with a wide-character plaintext dies');
+    like($enc_err, qr/^open on input string: /,
+        'the message names the failing in-memory open');
+    unlike($enc_err, qr{Crypt/Age\.pm},
+        'encrypt croaks: Crypt/Age.pm is not blamed as the origin');
+    my $enc_where = quotemeta(__FILE__).' line '.$enc_line;
+    like($enc_err, qr/$enc_where/,
+        'encrypt reports the caller position in this test file');
+
+    my ($dec_err, $dec_line);
+    {
+        local $SIG{__WARN__} = sub {};
+        local $@;
+        $dec_line = __LINE__ + 1;
+        eval { Crypt::Age->decrypt(ciphertext => $wide, identities => [$secret]) };
+        $dec_err = $@;
+    }
+
+    ok($dec_err, 'decrypt with a wide-character ciphertext dies');
+    like($dec_err, qr/^open on input string: /,
+        'the message names the failing in-memory open');
+    unlike($dec_err, qr{Crypt/Age\.pm},
+        'decrypt croaks: Crypt/Age.pm is not blamed as the origin');
+    my $dec_where = quotemeta(__FILE__).' line '.$dec_line;
+    like($dec_err, qr/$dec_where/,
+        'decrypt reports the caller position in this test file');
+}
+
 done_testing;

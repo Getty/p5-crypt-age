@@ -105,10 +105,10 @@ sub encrypt {
     my $plaintext  = $args{plaintext}  // croak "plaintext required";
     my $recipients = $args{recipients} // croak "recipients required";
 
-    open my $ifh, '<:raw', \$plaintext or die "open on input string: $!";
+    open my $ifh, '<:raw', \$plaintext or croak "open on input string: $!";
 
     my $output = '';
-    open my $ofh, '>:raw', \$output or die "open on output string: $!";
+    open my $ofh, '>:raw', \$output or croak "open on output string: $!";
 
     $class->_encrypt_fh($ifh, $ofh, $recipients);
 
@@ -152,10 +152,10 @@ sub decrypt {
     my $ciphertext = $args{ciphertext} // croak "ciphertext required";
     my $identities = $args{identities} // croak "identities required";
 
-    open my $ifh, '<:raw', \$ciphertext or die "open on input string: $!";
+    open my $ifh, '<:raw', \$ciphertext or croak "open on input string: $!";
 
     my $output = '';
-    open my $ofh, '>:raw', \$output or die "open on output string: $!";
+    open my $ofh, '>:raw', \$output or croak "open on output string: $!";
 
     $class->_decrypt_fh($ifh, $ofh, $identities);
 

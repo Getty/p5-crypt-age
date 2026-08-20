@@ -160,4 +160,45 @@ use Crypt::Age::Keys;
     }
 }
 
+# Ticket #23: the "character outside the Bech32 charset" croak used to
+# interpolate the offending character. No character of an encoded age key can
+# reach that branch -- every character of one is inside the charset by
+# construction, measured over freshly generated keys -- but bech32_decode is
+# public and takes any string, so what could be quoted back was one byte of
+# some other secret handed to it by mistake, a passphrase say. It now reports a
+# 0-based offset into the string that was passed in.
+#
+# The marker characters are deliberately non-alphanumeric: no message this
+# distribution writes contains one, so searching the exception for the
+# character is a real assertion. Searching for a "b" would always find one --
+# the word "bech32" is in the message itself.
+{
+    for my $case (
+        [ 'age1qpzry9!x8gf', '!', 10 ],
+        [ 'age1q#',          '#',  5 ],
+    ) {
+        my ($input, $marker, $offset) = @$case;
+
+        is(index($input, $marker), $offset,
+            "fixture: marker sits at offset $offset of the input");
+
+        eval { Crypt::Age::Keys->bech32_decode($input) };
+        my $err = $@;
+
+        like($err, qr/\AInvalid bech32 character at offset \Q$offset\E: /,
+            "out-of-charset character reported by its offset $offset");
+
+        # The same character counted from the start of the data part is a
+        # different, smaller number; this pins which of the two the message
+        # means, since only the whole-string offset is usable by a caller who
+        # has not itself located the separator.
+        my $data_offset = $offset - rindex($input, '1') - 1;
+        unlike($err, qr/at offset \Q$data_offset\E:/,
+            'the number is an offset into the whole string, not into the data part');
+
+        ok(index($err, $marker) < 0,
+            'the offending character itself does not appear in the message');
+    }
+}
+
 done_testing;

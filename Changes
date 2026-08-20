@@ -1,6 +1,25 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Crypt::Age::Keys::bech32_decode no longer echoes the character it rejected.
+    It now reports "Invalid bech32 character at offset N", a 0-based offset into
+    the string that was passed in, so substr($encoded, $N, 1) lands on the
+    character without quoting it. No byte of a real key was ever at risk --
+    every character of an encoded age key is inside the Bech32 charset, so none
+    can reach that branch -- but the method is public and takes any string, so a
+    passphrase handed to it by mistake had one of its bytes put in an exception.
+    Callers matching on the old message text must update.
+  - encrypt and decrypt now croak instead of die when an in-memory open fails,
+    so the error reports the caller's position rather than Crypt/Age.pm. This is
+    reachable: perl refuses to open a string holding code points above 0xFF,
+    which is what a caller gets for passing decoded characters where the API
+    wants bytes.
+  - An undef entry in the recipients array no longer emits two "Use of
+    uninitialized value" warnings ahead of the error explaining it; it is
+    rejected before any string operation touches it and reported as ", got
+    undef" in the same message shape as the identity hint. An undef entry in
+    identities is skipped without warning, which is what already happened to
+    any identity that does not match -- no outcome changes there, only the noise.
   - SECURITY: two error paths no longer echo what the caller passed in. Header
     parsing died with "Invalid age version: $version_line", where $version_line
     is the first line of the supplied ciphertext -- and since the read is

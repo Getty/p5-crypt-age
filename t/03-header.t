@@ -535,4 +535,88 @@ use Crypt::Age::Stanza::X25519;
         'no characteristic slice of the secret key leaks into the message');
 }
 
+# Ticket #25 regression: an undef entry in either array used to reach a
+# pattern match and emit "Use of uninitialized value" from library code --
+# twice from Header::create (the age1 prefix test and the identity hint),
+# once per X25519 stanza from unwrap_file_key. The warnings arrived ahead of
+# the message that explains the problem, and a caller cannot switch off
+# warnings that are enabled inside this distribution.
+#
+# The decisive assertions below are the is_deeply(\@warnings, []) ones. The
+# croak was already correct before the fix and its checks would have passed
+# against the old code too; only the warning count actually pins this ticket.
+{
+    my ($public)  = Crypt::Age::Keys->generate_keypair;
+    my ($public2) = Crypt::Age::Keys->generate_keypair;
+    my $file_key  = Crypt::Age::Primitives->generate_file_key;
+
+    # undef at a non-zero index, so the reported index has to be computed.
+    my @warnings;
+    my $err = do {
+        local $SIG{__WARN__} = sub { push @warnings, @_ };
+        local $@;
+        eval { Crypt::Age::Header->create($file_key, [$public, undef]) };
+        $@;
+    };
+    is_deeply(\@warnings, [],
+        'an undef recipient is rejected without any warning');
+    like($err,
+        qr/^Unsupported recipient format at index 1: expected an age1 recipient, got undef/,
+        'and with the index and ", got undef" in the message shape #22 established');
+
+    # Named through the same ", got ..." slot as the identity hint, so the
+    # two classifications stay mutually exclusive rather than accumulating.
+    unlike($err, qr/got an AGE-SECRET-KEY-1 identity/,
+        'and not also the identity hint, which undef must not reach');
+
+    # Index 0 as well: the message must not merely be right by coincidence
+    # for the one position the case above uses.
+    my @warnings_first;
+    my $err_first = do {
+        local $SIG{__WARN__} = sub { push @warnings_first, @_ };
+        local $@;
+        eval { Crypt::Age::Header->create($file_key, [undef, $public]) };
+        $@;
+    };
+    is_deeply(\@warnings_first, [],
+        'an undef recipient at index 0 is rejected without any warning');
+    like($err_first,
+        qr/^Unsupported recipient format at index 0: expected an age1 recipient, got undef/,
+        'and names index 0, so the index is computed and not hardcoded');
+
+    # The identity array is the other half of the ticket. It has the same
+    # hole -- a pattern match on undef, once per X25519 stanza -- but not the
+    # same contract: an identity that does not match is skipped, not fatal.
+    # So the fix there removes the warnings and must leave that behaviour
+    # alone. Two recipients, hence two stanzas, so a per-stanza warning would
+    # show up as two.
+    my ($public3, $secret3) = Crypt::Age::Keys->generate_keypair;
+    my $header = Crypt::Age::Header->create($file_key, [$public2, $public3]);
+    is(scalar @{$header->stanzas}, 2, 'fixture: header carries two X25519 stanzas');
+
+    my @warnings_id;
+    my $unwrapped = do {
+        local $SIG{__WARN__} = sub { push @warnings_id, @_ };
+        eval { $header->unwrap_file_key([undef, $secret3]) };
+    };
+    is_deeply(\@warnings_id, [],
+        'an undef identity is skipped without any warning');
+    is($unwrapped, $file_key,
+        'and a later valid identity still unwraps the file key, as before the fix');
+
+    # A list with nothing usable in it still ends at the croak, not at a
+    # warning and not at a silent success.
+    my @warnings_none;
+    my $err_none = do {
+        local $SIG{__WARN__} = sub { push @warnings_none, @_ };
+        local $@;
+        eval { $header->unwrap_file_key([undef, undef]) };
+        $@;
+    };
+    is_deeply(\@warnings_none, [],
+        'an all-undef identity list warns not at all');
+    like($err_none, qr/^No matching identity found/,
+        'and still fails with the unchanged no-match error');
+}
+
 done_testing;

@@ -279,12 +279,24 @@ sub bech32_decode {
     croak "Invalid bech32: empty data" if $sep_pos + 1 >= length($str);
 
     my $hrp = substr($str, 0, $sep_pos);
-    my $data_part = lc(substr($str, $sep_pos + 1));
+    my $data_part = substr($str, $sep_pos + 1);
 
-    # Decode data part
+    # Decode data part. The offending character is located, never quoted: no
+    # character of an encoded age key can reach this branch (every one of them
+    # is inside the charset by construction), so the only thing that could be
+    # copied into the exception is one byte of some other secret handed to this
+    # public method by mistake -- a passphrase, say. The offset counts from the
+    # start of $str rather than from the start of the data part, because $str
+    # is what the caller holds: substr($str, $N, 1) then lands on the character
+    # without the caller re-deriving where the separator was. Lowercasing one
+    # character at a time keeps that offset exact even where lc() of a single
+    # character is not a single character.
     my @data;
-    for my $c (split //, $data_part) {
-        croak "Invalid bech32 character: $c" unless exists $BECH32_CHAR_TO_VAL{$c};
+    for my $i (0 .. length($data_part) - 1) {
+        my $c = lc(substr($data_part, $i, 1));
+        croak "Invalid bech32 character at offset ".($sep_pos + 1 + $i)
+            .": expected a character of the Bech32 charset"
+            unless exists $BECH32_CHAR_TO_VAL{$c};
         push @data, $BECH32_CHAR_TO_VAL{$c};
     }
 
@@ -314,6 +326,17 @@ length.
 
 Dies if there is no C<1> separator, if the data part is empty, if it contains a
 character outside the Bech32 charset, or if the checksum does not verify.
+
+The charset failure names the position rather than the character: C<Invalid
+bech32 character at offset N>, where C<N> is a 0-based offset into the string
+that was passed in -- not into the data part after the separator -- so
+C<substr($encoded, $N, 1)> is the character it rejected. Withholding the
+character is deliberate. Anything a caller passes reaches here, and a string
+that is not an age key at all -- a passphrase handed to this method by mistake
+-- would otherwise have one of its own bytes quoted back in an exception that
+tends to end up in a log. No byte of an actual key is at stake either way:
+every character of an encoded key is inside the charset, so none of them can
+reach this failure.
 
 BIP-173 also requires an encoding to be entirely uppercase or entirely
 lowercase, and this method enforces that: a string mixing the two dies with

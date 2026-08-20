@@ -102,7 +102,13 @@ sub create {
         # Keys::decode_public_key already accepts it. A mixed-case recipient
         # still dies: it reaches decode_public_key and is rejected there by
         # bech32_decode's mixed-case guard.
-        if ($recipient =~ /^age1/i) {
+        #
+        # Definedness is tested first so that an undef entry never reaches this
+        # pattern match, nor the one in the hint below. Both would emit a "Use
+        # of uninitialized value" warning -- noise from library code, arriving
+        # ahead of the croak that actually explains the problem. The entry is
+        # rejected either way; undef is not an age1 recipient.
+        if (defined $recipient && $recipient =~ /^age1/i) {
             push @stanzas, Crypt::Age::Stanza::X25519->wrap($file_key, $recipient);
         } else {
             # Never interpolate $recipient. The likeliest way to reach this
@@ -117,7 +123,14 @@ sub create {
             # and structurally cannot expose key material. age(1) and rage(1)
             # do echo the string, but there it was already a command-line
             # argument; a library error message is not.
-            my $hint = $recipient =~ /^AGE-SECRET-KEY-1/i
+            #
+            # undef gets no message of its own: ", got undef" fills the same
+            # "what arrived instead" slot the identity hint already occupies,
+            # so the skeleton and the prefix stay one shape, and one croak
+            # keeps the variants from drifting apart. It is a classification
+            # too -- there is nothing to interpolate in the first place.
+            my $hint = !defined $recipient ? ', got undef'
+                : $recipient =~ /^AGE-SECRET-KEY-1/i
                 ? ', got an AGE-SECRET-KEY-1 identity' : '';
             croak 'Unsupported recipient format at index '.$i
                 .': expected an age1 recipient'.$hint;
@@ -162,6 +175,11 @@ with C<"Unsupported recipient format at index N: expected an age1 recipient">,
 where C<N> is the recipient's position in C<\@recipients>. A string that looks
 like an identity adds C<", got an AGE-SECRET-KEY-1 identity"> -- the swap of
 recipient and identity is the likely mistake, and both are plain strings.
+
+An C<undef> entry dies with that same message and C<", got undef"> in place of
+the identity hint; it is reported before any string operation touches it, so it
+no longer produces two C<"Use of uninitialized value"> warnings ahead of the
+error that explains it.
 
 The offending string itself is never part of the message. It may be a secret
 key, and the exception ends up in the caller's logs; the index locates the
@@ -479,6 +497,14 @@ sub unwrap_file_key {
     my ($self, $identities) = @_;
 
     for my $identity (@$identities) {
+        # Skipped before the prefix test below, which would otherwise emit a
+        # "Use of uninitialized value" warning once per X25519 stanza. Skipping
+        # is exactly what already happens to any string that is not an
+        # AGE-SECRET-KEY-1: unlike a recipient in create, an identity that does
+        # not match is not an error, it is simply not the one. So this drops
+        # the warnings and changes no outcome -- a list whose entries all fail
+        # to unwrap still ends at the croak below.
+        next unless defined $identity;
         for my $stanza (@{$self->stanzas}) {
             if ($stanza->isa('Crypt::Age::Stanza::X25519') && $identity =~ /^AGE-SECRET-KEY-1/i) {
                 my $file_key = $stanza->unwrap($identity);
@@ -509,6 +535,12 @@ Parameters:
 Tries each identity against each stanza until one successfully unwraps the file
 key and verifies the MAC. Returns the 16-byte file key. Stanzas of other types
 are skipped, so a file that mixes recipient types still decrypts.
+
+An C<undef> entry in C<\@identities> is skipped, silently and without warning,
+exactly as any other string that is not an C<AGE-SECRET-KEY-1> identity is: an
+identity that does not match is not an error here, only a list where none of
+them matches is. Unlike a recipient in L</create>, it is therefore not fatal on
+its own.
 
 Dies if no matching identity is found or if MAC verification fails. It does not
 die for a structurally invalid C<X25519> stanza -- L</parse> has already
