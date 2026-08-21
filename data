@@ -1,0 +1,33 @@
+---
+class: standard
+completed: 2026-08-21T04:07:04Z
+created: 2026-08-21T03:55:52Z
+id: 35
+priority: low
+started: 2026-08-21T03:56:22Z
+status: done
+tags:
+- security
+- api
+title: Keys::decode_secret_key and decode_public_key interpolate the caller's HRP
+  into the error
+updated: 2026-08-21T04:07:04Z
+---
+
+Found while doing #34, deliberately not fixed there -- different module, different methods, one ticket one change.
+
+Crypt::Age::Keys::decode_secret_key (Keys.pm:138) and decode_public_key (Keys.pm:101) interpolate the decoded HRP into their croak:
+
+    croak "Invalid secret key HRP: expected $HRP_SECRET, got $hrp"
+
+$hrp is everything before the last "1" in the caller string, so for a secret key that reaches this croak, the message carries a prefix of the caller material. Measured through unwrap_file_key -> X25519::unwrap:
+
+    Invalid secret key HRP: expected age-secret-key-, got AGE-SECRET-KEY-1ABCDEF
+
+Reachability is bounded and should be stated honestly on any fix: getting here needs a VALID bech32 checksum computed over the wrong HRP. Verified independently -- a truncated key dies at "Invalid bech32 character at offset 17", a key with trailing junk dies at "Invalid bech32 checksum", and neither of those quotes anything. So this is a deliberately constructed input, not an accidental one, which is why it is low and not high like #34.
+
+It is still caller input echoed from inside the module, the same defect class as #26/#28/#30/#31/#32/#33/#34, and the distribution already holds itself to not doing this (commits 8cfffda, 6f486f1).
+
+Fix shape: report the mismatch without quoting what arrived -- the expected HRP is a constant and is safe to name; the received one is caller material. Follow the message form settled across #31-#34: the clause after the colon carries the requirement and its reason, nothing interpolated. Note that decode_public_key handles a public key, so that half is not a secret disclosure, but both should read the same way.
+
+Test trap, learned in #32 and #34: perl truncates a quoted string at 32 characters, and Test::More like/unlike/is_deeply PRINT the value they were given when they fail -- so an assertion about key material must be ok(index(...) == -1) on substr($key, 0, 31), never unlike(), or the red run itself writes the key into the test output.
