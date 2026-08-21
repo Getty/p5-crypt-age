@@ -1,0 +1,28 @@
+---
+class: standard
+completed: 2026-08-21T03:42:15Z
+created: 2026-08-21T01:40:23Z
+id: 32
+priority: low
+started: 2026-08-21T03:25:48Z
+status: done
+tags:
+- api
+- security
+title: Header::parse does not validate its $offset_ref and perl's message quotes the
+  caller's string
+updated: 2026-08-21T03:42:15Z
+---
+
+Found while measuring #31, deliberately not fixed there -- one ticket, one change. Same defect class as #26/#28/#30/#31, one argument further in.
+
+Crypt::Age::Header->parse($data_ref, $offset_ref) now validates its first argument (#31) but nothing checks the second, and every bad shape reaches a raw dereference whose perl message echoes caller input:
+
+  * a plain string: dies "Can't use string (\"SOME-CALLER-STRING\") as a SCALAR ref while \"strict refs\" in use at lib/Crypt/Age/Header.pm line 464" -- the caller's own string quoted verbatim into the error, and located inside Header.pm rather than at the caller. A caller who swaps the two arguments puts a whole ciphertext there.
+  * missing / undef: "Can't use an undefined value as a SCALAR reference".
+  * an ARRAY or HASH ref: "Not a SCALAR reference".
+
+Echoing caller input is exactly what commits 8cfffda ("Locate bad input instead of quoting it") and 6f486f1 ("Stop echoing caller input in two error paths") set out to stop, so this is a regression against a standard the distribution already holds itself to, not a new nicety.
+
+Fix shape: croak naming the parameter and the fix when ref $offset_ref ne "SCALAR", before the dereference, no caller input echoed, matching the message style of #26/#28/#30/#31. Note #31 settled the wording question for a two-shape message -- the clause after the colon must carry the requirement and its reason, not a claim about what was passed. Regression test in t/03-header.t alongside the #31 block.
+2026-08-21 03:31 Fixed. Header::parse croaks 'offset must be a ScalarRef: this method writes the new offset back through it, pass \$offset rather than $offset' when ref $offset_ref ne 'SCALAR'. Placed as the second of the three checks, before the wide-character scan: both argument-shape checks now settle whether the call can succeed at all before anything reads the caller's data, reasoned in the comment. POD on =method parse extended; Changes entry under {{$NEXT}}. Regression block in t/03-header.t next to the #31 block: plain string / undef / ARRAY ref all croak the new message, no 'strict refs', no caller marker in the message, croak located at the caller, no warning out of Header.pm, plus one assertion pinning the check order and a counter-proof that a ScalarRef offset still parses and is written back. Red before green: 12 failures before the fix, none after. Runs: prove -lr t/ 657 tests PASS; prove -lv t/07-testkit.t 144 PASS (68 vectors run, 75 skipped for recorded reasons); prove -lv t/04-interop.t RAN, 120 tests PASS against age 1.2.1 and rage 0.12.1. No commit.
