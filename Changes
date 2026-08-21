@@ -1,6 +1,42 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Crypt::Age::Header->parse now requires the scalar behind its first
+    argument to be defined, and croaks "data must refer to a defined scalar:
+    this method reads the age file out of it, assign the bytes before passing
+    \$data". A ScalarRef to an undefined scalar satisfies the two shape checks
+    above -- it really is a ScalarRef -- and used to raise ten "Use of
+    uninitialized value" warnings from inside Header.pm, from the byte-string
+    scan, from seven reads of an in-memory handle opened on nothing, and from
+    the version line readline returned as undef, before croaking "Invalid age
+    version". All ten carried Header.pm line numbers for a mistake made one
+    frame up and none of them told the caller anything actionable. Callers
+    matching on the old "Invalid age version" message for this case see the
+    new one instead; that is the point, since a ref to nothing is a mistake in
+    the call, not a statement about data that arrived.
+  - Crypt::Age::Header->parse_from_fh no longer warns twice out of Header.pm
+    when the handle is already at end of input. readline returns undef there,
+    and chomp and string eq on it warned before the correct croak. An absent
+    version line is now carried into the same check as an empty one, so the
+    message is unchanged. This is what an empty ciphertext reaches through
+    Crypt::Age::decrypt, and what an empty $data reaches through parse, so
+    both are warning-free now as well; only the warnings are gone, the errors
+    are the same.
+  - Crypt::Age::Header->parse now requires its second argument to really be a
+    ScalarRef as well, and croaks "offset must be a ScalarRef: this method
+    writes the new offset back through it, pass \$offset rather than $offset"
+    for every other shape. Nothing checked it before, so a plain string, undef
+    or another kind of ref reached a raw dereference and came back as perl's
+    own "Can't use string (\"...\") as a SCALAR ref while \"strict refs\" in
+    use", "Can't use an undefined value as a SCALAR reference" or "Not a
+    SCALAR reference" -- the first of those quoting the caller's own string
+    into the message, and all three blaming a line inside Header.pm for a
+    mistake made one frame up. The message quotes no part of the argument,
+    which for a caller who passed the two arguments the other way round is the
+    ciphertext. Both argument shapes are now checked before anything looks at
+    the data, so a call malformed in its second argument is never reported
+    first as a complaint about the first one's contents. The POD of parse now
+    states the requirement.
   - Crypt::Age::Header->parse now requires its first argument to really be a
     ScalarRef and croaks "data must be a ScalarRef: this method opens it, and a
     plain string is a filename, pass \$data rather than $data" for every other

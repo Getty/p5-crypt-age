@@ -244,6 +244,15 @@ sub parse_from_fh {
     # We start from the first line.
     my $bytes = <$fh>;
 
+    # readline gives undef at end of input, and arriving here with nothing to
+    # read is a legitimate "this is not an age file": an empty $data, or an
+    # offset already at its end. That is exactly what the version croak below
+    # reports -- but chomp and eq on undef warned out of this file first, with
+    # line numbers from here for a mistake made one frame up. An absent version
+    # line is not the expected literal either, so carry it into the same check
+    # the empty first line takes rather than warning on the way to it.
+    $bytes = '' unless defined $bytes;
+
     # Check version
     chomp(my $version_line = $bytes); # remove \x{0a}
     # Never interpolate $version_line: reaching this croak means the input is
@@ -373,7 +382,9 @@ Dies if:
 =over 4
 
 =item * the first line is not the literal C<age-encryption.org/v1> version
-line
+line -- including when there is no first line at all, because the handle is
+already at end of input. That case reads as an absent version line and gets
+the same message, without warning about the C<undef> that C<readline> returned
 
 =item * a stanza body line is longer than 64 characters
 
@@ -443,6 +454,46 @@ sub parse {
         .'is a filename, pass \$data rather than $data'
         if ref $data_ref ne 'SCALAR';
 
+    # The same test for the second parameter, and here for the opposite
+    # reason: nothing is read through this ref -- the new offset is written
+    # back out through it, which is how the caller learns where the payload
+    # starts, and only a ref carries a value back out of a call. Both shape
+    # checks sit before the scan below on purpose. They decide whether this
+    # call can succeed at all, while the scan reads the caller's data, so a
+    # complaint about that data is worth producing only once the call itself
+    # is well formed -- and a caller who passed the two arguments the other
+    # way round is exactly such a call, wrong in both of them.
+    #
+    # Never interpolate $offset_ref either, for the same reason as above with
+    # the arguments swapped: perl's own "Can't use string (...) as a SCALAR
+    # ref" quoted the ciphertext that lands here, and blamed a line in this
+    # file for a mistake made one frame up.
+    croak 'offset must be a ScalarRef: this method writes the new offset back '
+        .'through it, pass \$offset rather than $offset'
+        if ref $offset_ref ne 'SCALAR';
+
+    # And now the content, before anything dereferences it for real. A ref to
+    # an undefined scalar passes both shape checks above -- it genuinely is a
+    # ScalarRef -- and then reached the scan below, the open under it and the
+    # readline in parse_from_fh, warning ten times about uninitialized values
+    # with line numbers from this file for a mistake made one frame up.
+    #
+    # This gets a croak of its own rather than being normalized to the empty
+    # string and left to the version-line croak in parse_from_fh, because the
+    # two are different mistakes with different fixes: "there is nothing behind
+    # the ref you handed me" is a caller error, while "these bytes are not an
+    # age file" is a statement about data that really arrived. Folding the
+    # first into the second would name a cause the caller does not have. Empty
+    # bytes stay the second kind and still get the version-line croak, which
+    # no longer warns on its way there either -- see parse_from_fh.
+    #
+    # Nothing interpolated here either, for the reason given above: there is no
+    # value to quote in this case, and the message must read the same when the
+    # check moves or the caller's scalar turns out to hold ciphertext.
+    croak 'data must refer to a defined scalar: this method reads the age '
+        .'file out of it, assign the bytes before passing \$data'
+        unless defined $$data_ref;
+
     # Perl's own test for the in-memory open below, hoisted so the failure
     # names its cause instead of arriving as "cannot read". The reasoning is
     # written out over the same check in Crypt::Age::encrypt; the delta here is
@@ -496,6 +547,40 @@ string names, and got a header parsed out of it rather than a type error.
 C<undef>, a blessed scalar ref, a ref to a ref and every other shape are
 refused by the same check and get the same message. It quotes no part of the
 argument, since here that argument is either ciphertext or a path.
+
+C<\$offset> must be a ScalarRef too, for the opposite reason: it is an
+B<out-parameter>. Nothing is read through it beyond the offset to start at --
+the new offset is written back out through the same ref, which is how the
+caller learns where the payload begins, and only a ref carries a value back
+out of a call. Every other shape used to reach a raw dereference and be
+reported by perl as C<"Can't use string (...) as a SCALAR ref while "strict
+refs" in use">, C<"Can't use an undefined value as a SCALAR reference"> or
+C<"Not a SCALAR reference">, each of them blaming a line in this module for a
+mistake made one frame up. They are now refused with C<"offset must be a
+ScalarRef: this method writes the new offset back through it, pass \$offset
+rather than $offset">. As above, the clause after the colon carries the
+requirement and its reason rather than a description of what arrived, since
+one message answers all of those shapes; and it quotes no part of the
+argument, which for a caller who passed the two arguments the other way round
+is the ciphertext.
+
+Both argument shapes are settled before anything looks at the data, so a call
+that is malformed in its second argument is reported as that, and never first
+as a complaint about the first argument's contents.
+
+The scalar C<\$data> refers to must also be B<defined>. A ScalarRef to an
+undefined scalar -- C<parse(\my $undef, \$offset)> -- satisfies both shape
+checks above and used to reach the byte-string scan, the in-memory open under
+it and the readline in L</parse_from_fh>, raising ten C<"Use of uninitialized
+value"> warnings carrying line numbers from inside this module before it
+croaked. It is now refused with C<"data must refer to a defined scalar: this
+method reads the age file out of it, assign the bytes before passing \$data">.
+
+That is deliberately B<not> the same error as an empty or otherwise
+unparseable C<$data>, which keeps the plain C<"Invalid age version: expected
+the literal age-encryption.org/v1 version line">. A ref to nothing is a
+mistake in the call; bytes that are not an age file are a statement about data
+that really arrived, and the two have different fixes. Neither path warns.
 
 Returns a L<Crypt::Age::Header> object. The C<$offset> is updated to point to
 the start of the payload.

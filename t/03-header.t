@@ -756,6 +756,81 @@ my $ref_msg = 'data must be a ScalarRef: this method opens it, and a plain '
         'and advance the offset to the end of the header');
 }
 
+# Ticket #32, the same defect class as #31 one argument further in. parse's
+# second parameter is an out-parameter -- it seeks to the offset the ref holds
+# and writes the new one back through it -- but nothing checked its shape, so
+# every wrong one reached a raw dereference: a plain string died with perl's
+# "Can't use string (\"...\") as a SCALAR ref while \"strict refs\" in use",
+# quoting the caller's own string and blaming a line in Header.pm, undef died
+# with "Can't use an undefined value as a SCALAR reference", and another kind
+# of ref with "Not a SCALAR reference". A caller who passes the two arguments
+# the other way round puts a whole ciphertext where that quoted string comes
+# from, which is why the message below carries the requirement and its reason
+# and no part of the argument.
+my $offset_msg = 'offset must be a ScalarRef: this method writes the new '
+    .'offset back through it, pass \$offset rather than $offset';
+
+{
+    # A real, parseable header as the first argument, so nothing before the
+    # offset check can account for the failure: without the check this call
+    # gets past the open and dies at the seek.
+    my ($public) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+    my $data = Crypt::Age::Header->create($file_key, [$public])->to_string;
+
+    my $marker = 'CALLER-INPUT-MUST-NOT-LEAK-HERE';
+
+    for my $case (['a plain string', $marker],
+                  ['undef', undef],
+                  ['an ARRAY ref', [1, 2]]) {
+        my ($what, $arg) = @$case;
+
+        my ($err, $line, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            $line = __LINE__ + 1;
+            eval { Crypt::Age::Header->parse(\$data, $arg) };
+            $err = $@;
+        }
+
+        like($err, qr/^\Q$offset_msg\E\b/,
+            "$what is rejected by type, naming the parameter and the fix");
+        unlike($err, qr/strict refs/,
+            "$what no longer arrives as perl's own dereference error");
+        ok(index($err, $marker) == -1,
+            "$what leaves no caller input in the message");
+        is_deeply(\@warn, [],
+            "$what reaches no dereference, so nothing warns out of Header.pm");
+        unlike($err, qr{Crypt/Age/Header\.pm},
+            "$what croaks: Header.pm is not blamed as the origin");
+        my $where = quotemeta(__FILE__).' line '.$line;
+        like($err, qr/$where/,
+            "$what reports the caller position in this test file");
+    }
+
+    # Both argument shapes are settled before anything looks at the data, so a
+    # call that is malformed in its second argument is reported as that, not as
+    # a complaint about the first one's contents. This is the documented order.
+    my $wide = "age-encryption.org/v1\n\x{100} not bytes";
+    my $err_order = do {
+        local $@;
+        eval { Crypt::Age::Header->parse(\$wide, $marker) };
+        $@;
+    };
+    like($err_order, qr/^\Q$offset_msg\E\b/,
+        'the offset shape is checked before the data is scanned for bytes');
+
+    # Counter-proof that the loop above measures the type check: the same call
+    # with a ScalarRef offset parses and reports where the payload starts.
+    my $offset = 0;
+    my $parsed = Crypt::Age::Header->parse(\$data, \$offset);
+    is(scalar @{$parsed->stanzas}, 1,
+        'a ScalarRef offset still parses the header');
+    is($offset, length($data),
+        'and the new offset is written back through it');
+}
+
 # Ticket #30 counter-proof: the check may reject only what perl cannot map. A
 # header stored upgraded whose code points all fit in a byte is bytes, and it
 # is what rules out utf8::is_utf8 as the test -- that would answer true here
@@ -781,6 +856,100 @@ my $ref_msg = 'data must be a ScalarRef: this method opens it, and a plain '
 
     ok(!utf8::is_utf8($str),
         "perl's in-memory open downgraded the caller's scalar, not our check");
+}
+
+# Ticket #33, the same series one step further in: the argument shapes are both
+# right and the content is missing. parse(\my $undef, \my $offset) passes #31's
+# ScalarRef check (it really is one) and #32's offset check, and then used to
+# emit ten "Use of uninitialized value" warnings out of Header.pm before
+# croaking -- one from the byte-string scan, seven from reading an in-memory
+# handle opened on an undefined scalar, and two from the version line that
+# readline handed back as undef. Every one of them carried a Header.pm line
+# number for a mistake made one frame up, and a caller can act on none of them.
+#
+# The undefined referent gets its own croak rather than being normalized to the
+# empty string and left to the version-line croak: "there is nothing behind the
+# ref you gave me" and "these bytes are not an age file" are different mistakes
+# with different fixes, and this series has consistently named the cause instead
+# of burying it under a more general message.
+my $undef_msg = 'data must refer to a defined scalar: this method reads the '
+    .'age file out of it, assign the bytes before passing \$data';
+
+{
+    my ($err, $line, @warn);
+    my $offset = 0;
+    {
+        local $SIG{__WARN__} = sub { push @warn, $_[0] };
+        local $@;
+        my $undef;
+        $line = __LINE__ + 1;
+        eval { Crypt::Age::Header->parse(\$undef, \$offset) };
+        $err = $@;
+    }
+
+    is_deeply(\@warn, [],
+        'a ScalarRef to an undefined scalar warns nothing out of Header.pm');
+    like($err, qr/^\Q$undef_msg\E\b/,
+        'it is refused by its own croak, naming the cause and the fix');
+    unlike($err, qr/Invalid age version/,
+        'and not folded into the "not an age file" croak, which is a different mistake');
+    like($err, qr/^\Q$undef_msg\E at /,
+        'nothing is interpolated between the message and the croak position');
+    unlike($err, qr{Crypt/Age/Header\.pm},
+        'it croaks: Header.pm is not blamed as the origin');
+    my $where = quotemeta(__FILE__).' line '.$line;
+    like($err, qr/$where/,
+        'the croak reports the caller position in this test file');
+    is($offset, 0, 'the offset ref was left untouched');
+}
+
+# The neighbour path, which the fix above must not take over: an empty $data is
+# a legitimate "not an age file" and keeps the plain version-line croak. It was
+# not warning-free before this ticket either -- two of the ten above are shared
+# with it, raised by chomp and eq on the undef that readline returns at end of
+# input -- so this assertion is the record that the two paths now differ in
+# their message and agree in warning nothing.
+{
+    my ($err, @warn);
+    my $offset = 0;
+    {
+        local $SIG{__WARN__} = sub { push @warn, $_[0] };
+        local $@;
+        my $data = '';
+        eval { Crypt::Age::Header->parse(\$data, \$offset) };
+        $err = $@;
+    }
+
+    is_deeply(\@warn, [],
+        'an empty $data warns nothing out of Header.pm either');
+    like($err,
+        qr/^Invalid age version: expected the literal age-encryption\.org\/v1 version line at /,
+        'and still gets the plain version-line croak, with nothing interpolated');
+    unlike($err, qr/\Q$undef_msg\E/,
+        'empty bytes are data that arrived, not a ref to nothing');
+}
+
+# Same absence one frame down, at the line the fix actually sits on: a handle
+# already at end of input has no version line to read, and reports that without
+# warning first. parse_from_fh is public, and Crypt::Age::decrypt reaches it
+# directly rather than through parse, so this is the path an empty ciphertext
+# takes through the string API.
+{
+    my $empty = '';
+    open my $fh, '<:raw', \$empty or die "open: $!";
+
+    my ($err, @warn);
+    {
+        local $SIG{__WARN__} = sub { push @warn, $_[0] };
+        local $@;
+        eval { Crypt::Age::Header->parse_from_fh($fh) };
+        $err = $@;
+    }
+
+    is_deeply(\@warn, [],
+        'parse_from_fh on a handle at end of input warns nothing');
+    like($err, qr/^Invalid age version: expected the literal /,
+        'and reports the missing version line');
 }
 
 done_testing;
