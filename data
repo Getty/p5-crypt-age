@@ -1,0 +1,42 @@
+---
+claimed_at: 2026-08-21T01:19:58Z
+claimed_by: crypt-age-worker
+class: standard
+completed: 2026-08-21T03:25:32Z
+created: 2026-08-20T15:51:02Z
+id: 28
+priority: low
+started: 2026-08-21T01:14:38Z
+status: done
+tags:
+- api
+- docs
+title: Primitives::encrypt_payload/decrypt_payload pass EINVAL through for a wide-character
+  string
+updated: 2026-08-21T03:25:32Z
+---
+
+Found while doing #26, deliberately not fixed there (one ticket, one change; #26 was scoped to lib/Crypt/Age.pm).
+
+#26 gave Crypt::Age::encrypt/decrypt a byte-string check before their in-memory opens, so a caller passing a decoded character string now gets a message naming the cause and the fix instead of perl EINVAL, and perl own "code points over 0xFF" warning no longer fires.
+
+Crypt::Age::Primitives->encrypt_payload and ->decrypt_payload (Primitives.pm, around lines 292 and 358) take a caller string and map it the same way:
+
+    open my $ifh, "<:raw", \$plaintext or croak "Cannot open input string: $!";
+
+so they still have the untreated form of the same defect: perl warns, the open returns false, and the croak reads "Cannot open input string: Invalid argument", which names no cause. Both are public, documented class methods.
+
+Two pieces, matching what #26 did:
+  - the same utf8::downgrade($str, 1) check before the open, with a message naming the parameter and the fix
+  - POD saying the parameter is a byte string
+
+The output-side opens there write into a lexical the method owns and are not caller-reachable, same as in Crypt::Age.
+
+Rationale for utf8::downgrade over utf8::is_utf8 or a /[^\x00-\xff]/ scan is written out in the comment above the check in Crypt::Age::encrypt; reuse it rather than re-deriving it.
+2026-08-21 01:19 Done. lib/Crypt/Age/Primitives.pm: utf8::downgrade($str, 1) check ahead of the input open in encrypt_payload and decrypt_payload, messages identical to the #26 pair ("plaintext must be a byte string: it holds a code point above 0xFF, encode it before passing it in" / "ciphertext ... read it with :raw rather than decoding it"); short comment pointing at the rationale over the same check in Crypt::Age::encrypt rather than repeating it. POD on both =method blocks states the byte-string requirement and quotes the message. Output-side opens untouched as specified. Changes entry added.
+
+Regression test: new block in t/05-primitives.t (plus a counter-proof block) -- asserts the message, no EINVAL passthrough, zero perl warnings, croak blames the caller line, and no input echoed. Verified it fails against HEAD lib: 6 of 64 fail (the two message assertions, the two EINVAL assertions, the two warning assertions); the croak-location assertions already passed, since #24 put croak there.
+
+Ran: prove -lr t/ -> 593 tests, PASS. prove -lv t/07-testkit.t -> 144 assertions, 68 vectors run / 75 skipped, PASS. prove -lv t/04-interop.t -> RAN, not skipped: 120 tests, both CLIs (age 1.2.1 and rage 0.12.1). No commit made.
+
+Follow-up filed as #30: Header::parse has the same defect class at Header.pm:425 but takes a scalar ref, so the #26/#28 fix does not transfer unchanged.
