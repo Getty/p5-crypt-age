@@ -1,0 +1,29 @@
+---
+class: standard
+completed: 2026-08-21T04:07:12Z
+created: 2026-08-21T03:56:00Z
+id: 37
+priority: low
+started: 2026-08-21T03:56:26Z
+status: done
+tags:
+- docs
+- api
+title: Crypt::Age and Crypt::Age::Header disagree on the wording for the same rejected
+  parameter
+updated: 2026-08-21T04:07:12Z
+---
+
+Found while doing #34, not fixed there -- one ticket, one change.
+
+The same mistake now gets two different messages depending on which layer catches it:
+
+    Crypt::Age::_encrypt_fh:  recipients must be an array ref
+    Crypt::Age::Header->create: recipients must be an ArrayRef: this method wraps the file key once per entry, pass [$recipient] rather than $recipient
+
+Same parameter name, same defect, two spellings. The second is the form this distribution settled on across #31/#32/#33/#34: <param> must be a <type>: <requirement and its reason>, <fix>, with nothing interpolated. The older pair in Crypt/Age.pm predates it.
+
+Not urgent and not a bug -- both messages are true and neither leaks. It is a consistency defect, and it matters because a caller who hits one and searches for the other finds nothing.
+
+Fix shape: bring the Crypt/Age.pm guards up to the settled form. Check for the identities counterpart in _decrypt_fh at the same time, and grep for any other "must be an array ref" spelling before assuming there are only two. Adjust whatever tests match on the old text -- read what each asserts before changing it, per house rule 8.
+2026-08-21 04:04 Both guards in lib/Crypt/Age.pm brought to the settled form; reason stated per layer (encrypts to every entry / decrypts with whichever entry matches), nothing interpolated. Strictness unchanged. POD of encrypt, decrypt and encrypt_filehandle pulled along; regression block added to t/02-encrypt-decrypt.t pinning code and POD to one literal. No existing test matched the old text. Changes entry under {{$NEXT}}. Not committed.
