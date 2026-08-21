@@ -94,6 +94,27 @@ has _bytes => (
 sub create {
     my ($class, $file_key, $recipients) = @_;
 
+    # The shape check the loop below assumed. $#{$recipients} dereferences
+    # whatever arrives, so every wrong shape used to be reported by perl from
+    # inside this module: a plain string as "Can't use string (\"...\") as an
+    # ARRAY ref while \"strict refs\" in use", undef as "Can't use an undefined
+    # value as an ARRAY reference", any other ref as "Not an ARRAY reference".
+    #
+    # The first of those quotes the caller's string, truncated at perl's 32
+    # characters. Here that string is normally a recipient and so public, but
+    # the mistake that puts a bare string in this parameter is the same one
+    # that swaps recipient and identity -- both are plain strings, and the
+    # croak below in the loop exists because that swap happens -- so the value
+    # perl would quote is not reliably a public one. Nothing is interpolated,
+    # for the reason written out at that croak and again in unwrap_file_key.
+    #
+    # The clause after the colon carries the requirement and its reason rather
+    # than a description of what arrived, because one message answers all three
+    # shapes above.
+    croak 'recipients must be an ArrayRef: this method wraps the file key '
+        .'once per entry, pass [$recipient] rather than $recipient'
+        if ref $recipients ne 'ARRAY';
+
     my @stanzas;
     for my $i (0 .. $#{$recipients}) {
         my $recipient = $recipients->[$i];
@@ -162,6 +183,24 @@ Parameters:
 =item * C<\@recipients> - ArrayRef of Bech32-encoded public keys (C<age1...>)
 
 =back
+
+C<\@recipients> must really be an ArrayRef; a single recipient still goes in a
+list of one. Every other shape used to reach a raw dereference and be reported
+by perl as C<"Can't use string (...) as an ARRAY ref while "strict refs" in
+use">, C<"Can't use an undefined value as an ARRAY reference"> or C<"Not an
+ARRAY reference">, each of them blaming a line in this module for a mistake
+made one frame up. They are now refused, before the file key is wrapped, with
+C<"recipients must be an ArrayRef: this method wraps the file key once per
+entry, pass [$recipient] rather than $recipient">. As elsewhere in this module
+the clause after the colon carries the requirement and its reason rather than a
+description of what arrived, since one message answers all of those shapes.
+
+It quotes no part of the argument either. The first of perl's messages above
+quoted the caller's string, truncated at 32 characters; the string in this
+parameter is normally a public key, but the mistake that puts a bare string
+here is the same one that swaps recipient and identity, which is why the
+per-entry croak below reports that swap. See L</unwrap_file_key>, where the
+value is never public.
 
 Returns a L<Crypt::Age::Header> object with stanzas for each recipient and a
 computed MAC.
@@ -647,6 +686,24 @@ MAC at all -- returns C<0>; it is never fatal.
 sub unwrap_file_key {
     my ($self, $identities) = @_;
 
+    # The same shape check as in create, and the one place in this distribution
+    # where omitting it leaked a secret. @$identities dereferences whatever
+    # arrives, and for a bare string perl reports "Can't use string (\"...\")
+    # as an ARRAY ref while \"strict refs\" in use" with the first 32
+    # characters of that string quoted in it. The string in this parameter is
+    # an identity, so those 32 characters are secret key material, written into
+    # an exception by this module -- and an exception travels into logs, bug
+    # reports and terminal scrollback that the caller cannot redact after the
+    # fact. A single identity passed without the brackets is the likeliest way
+    # to get here at all, since one identity does not look like a list.
+    #
+    # undef and other refs reach the same dereference and are answered by the
+    # same message; as in create it carries the requirement and its reason, and
+    # quotes nothing.
+    croak 'identities must be an ArrayRef: this method tries each entry in '
+        .'turn, pass [$identity] rather than $identity'
+        if ref $identities ne 'ARRAY';
+
     for my $identity (@$identities) {
         # Skipped before the prefix test below, which would otherwise emit a
         # "Use of uninitialized value" warning once per X25519 stanza. Skipping
@@ -682,6 +739,23 @@ Parameters:
 =item * C<\@identities> - ArrayRef of Bech32-encoded secret keys (C<AGE-SECRET-KEY-1...>)
 
 =back
+
+C<\@identities> must really be an ArrayRef; a single identity still goes in a
+list of one. That is the call which used to get this wrong, because one
+identity does not look like a list -- and here the check is a confidentiality
+one. A bare identity string reached a raw dereference and was reported by perl
+as C<"Can't use string (...) as an ARRAY ref while "strict refs" in use">,
+where the C<(...)> is the first 32 characters of the identity: secret key
+material, placed in an exception by this module, on its way into whatever log,
+bug report or terminal scrollback catches it, where the caller can no longer
+redact it. C<undef> and other refs reached the same dereference and were
+reported as C<"Can't use an undefined value as an ARRAY reference"> or C<"Not
+an ARRAY reference">.
+
+All of them are now refused, before any identity is looked at, with
+C<"identities must be an ArrayRef: this method tries each entry in turn, pass
+[$identity] rather than $identity">, which carries the requirement and its
+reason and no byte of the argument.
 
 Tries each identity against each stanza until one successfully unwraps the file
 key and verifies the MAC. Returns the 16-byte file key. Stanzas of other types

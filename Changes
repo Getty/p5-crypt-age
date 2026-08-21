@@ -1,6 +1,29 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Crypt::Age::Header->unwrap_file_key and ->create now require their list
+    argument to really be an ArrayRef, and croak "identities must be an
+    ArrayRef: this method tries each entry in turn, pass [$identity] rather
+    than $identity" and "recipients must be an ArrayRef: this method wraps the
+    file key once per entry, pass [$recipient] rather than $recipient" for
+    every other shape. Neither checked before, so a caller passing a single
+    identity or recipient bare -- one identity does not look like a list --
+    reached a raw dereference. On unwrap_file_key that was a disclosure of
+    secret key material, not merely a bad message: perl's "Can't use string
+    (\"...\") as an ARRAY ref while \"strict refs\" in use" quotes the first 32
+    characters of the offending string, so an identity was written into an
+    exception raised inside this module, on its way into any log, bug report
+    or terminal scrollback that caught it, where the caller can no longer
+    redact it. A recipient is a public key, so create was not a leak, but it
+    is the same defect one call away and the swap of recipient and identity
+    puts a secret key in that parameter too. undef and other refs came back as
+    "Can't use an undefined value as an ARRAY reference" or "Not an ARRAY
+    reference", both blaming a line in Header.pm for a mistake made one frame
+    up. The new messages quote no part of the argument. The string, file and
+    filehandle API was never affected -- Crypt::Age's own recipients and
+    identities checks already stand in front of both calls -- so this reaches
+    only callers using Crypt::Age::Header directly. The POD of both methods
+    states the requirement.
   - Crypt::Age::Header->parse now requires the scalar behind its first
     argument to be defined, and croaks "data must refer to a defined scalar:
     this method reads the age file out of it, assign the bytes before passing

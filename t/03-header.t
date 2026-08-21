@@ -952,4 +952,173 @@ my $undef_msg = 'data must refer to a defined scalar: this method reads the '
         'and reports the missing version line');
 }
 
+# Ticket #34, the same series in the other pair of public methods -- and the one
+# entry in it that leaks a secret. create and unwrap_file_key both dereferenced
+# their list parameter without checking it, so a caller who passed a bare string
+# instead of an ArrayRef got perl's own message, which quotes the first 32
+# characters of the offending string:
+#
+#     Can't use string ("AGE-SECRET-KEY-1FAKEFAKEFAKEFAKE"...) as an ARRAY ref
+#
+# For unwrap_file_key that string is an B<identity>, so the exception carried
+# secret key material into whatever log caught it, written from inside this
+# module where the caller can no longer redact it. For create the string is a
+# public key and so not a secret, but it is the identical defect one call away,
+# and the swap of recipient and identity -- both are plain strings -- is exactly
+# how a secret reaches create too. That swap is covered below on both methods.
+#
+# The markers here are 26 and 23 characters on purpose, and the real-key cases
+# assert on a 31-character prefix rather than the whole string. Perl truncates
+# the quoted string at 32, so anything longer never appears in the message even
+# in the red state, and a "nothing leaked" assertion built on it passes without
+# being able to fail. Every key here is fabricated or freshly generated.
+my $recipients_msg = 'recipients must be an ArrayRef: this method wraps the '
+    .'file key once per entry, pass [$recipient] rather than $recipient';
+my $identities_msg = 'identities must be an ArrayRef: this method tries each '
+    .'entry in turn, pass [$identity] rather than $identity';
+
+{
+    my ($public) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+
+    my $marker = 'age1LEAKMARKERRECIPIENT';
+
+    for my $case (['a bare recipient string', $marker],
+                  ['undef',                   undef],
+                  ['a HASH ref',              { $marker => 1 }]) {
+        my ($what, $arg) = @$case;
+
+        my ($err, $line, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            $line = __LINE__ + 1;
+            eval { Crypt::Age::Header->create($file_key, $arg) };
+            $err = $@;
+        }
+
+        like($err, qr/^\Q$recipients_msg\E\b/,
+            "$what is rejected by type, naming the parameter and the fix");
+        unlike($err, qr/strict refs|ARRAY reference/,
+            "$what no longer arrives as perl's own dereference error");
+        ok(index($err, $marker) == -1,
+            "$what leaves no caller input in the message");
+        is_deeply(\@warn, [],
+            "$what reaches no dereference, so nothing warns out of Header.pm");
+        unlike($err, qr{Crypt/Age/Header\.pm},
+            "$what croaks: Header.pm is not blamed as the origin");
+        my $where = quotemeta(__FILE__).' line '.$line;
+        like($err, qr/$where/,
+            "$what reports the caller position in this test file");
+    }
+
+    # The swap: a caller who passes an identity where the recipient belongs
+    # puts a secret key into this parameter, bare. The assertion is on the
+    # first 31 characters rather than the whole key, because the whole key is
+    # 62 and perl would only ever have quoted 32 of them -- an index() on the
+    # full string cannot fail and would prove nothing.
+    #
+    # Every assertion in this sub-block is an index() inside ok(), never a
+    # like()/unlike() on $err and never is_deeply on the warnings. Those print
+    # the value they were given when they fail, so a red state here would put
+    # the same 32 characters of a real key into the test output that the bug
+    # puts into the caller's log -- measured, not assumed: the first run of
+    # this block did exactly that. ok() prints its name and nothing else.
+    my ($public2, $secret) = Crypt::Age::Keys->generate_keypair;
+    {
+        my ($err, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            eval { Crypt::Age::Header->create($file_key, $secret) };
+            $err = $@;
+        }
+
+        ok(index($err, $recipients_msg) == 0,
+            'a bare identity in place of the recipient list is a type error');
+        ok(index($err, substr($secret, 0, 31)) == -1,
+            'and no part of that secret key reaches the message');
+        ok(index($err, 'AGE-SECRET-KEY-1') == -1,
+            'not even the identity prefix');
+        is(scalar @warn, 0, 'and nothing warns out of Header.pm');
+    }
+
+    # Counter-proof that the cases above measure the type check and not a
+    # recipient this method could not have used anyway.
+    my $header = Crypt::Age::Header->create($file_key, [$public]);
+    is(scalar @{$header->stanzas}, 1,
+        'the same recipient inside an ArrayRef still produces its stanza');
+}
+
+{
+    my ($public, $secret) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+    my $header = Crypt::Age::Header->create($file_key, [$public]);
+
+    my $marker = 'AGE-SECRET-KEY-1LEAKMARKER';
+
+    for my $case (['a bare identity string', $marker],
+                  ['undef',                  undef],
+                  ['a HASH ref',             { $marker => 1 }]) {
+        my ($what, $arg) = @$case;
+
+        my ($err, $line, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            $line = __LINE__ + 1;
+            eval { $header->unwrap_file_key($arg) };
+            $err = $@;
+        }
+
+        like($err, qr/^\Q$identities_msg\E\b/,
+            "$what is rejected by type, naming the parameter and the fix");
+        unlike($err, qr/strict refs|ARRAY reference/,
+            "$what no longer arrives as perl's own dereference error");
+        ok(index($err, $marker) == -1,
+            "$what leaves no key material in the message");
+        ok(index($err, 'LEAKMARKER') == -1,
+            "$what leaves no fragment of it either");
+        unlike($err, qr/AGE-SECRET-KEY-1/i,
+            "$what does not even name the identity prefix");
+        is_deeply(\@warn, [],
+            "$what reaches no dereference, so nothing warns out of Header.pm");
+        unlike($err, qr{Crypt/Age/Header\.pm},
+            "$what croaks: Header.pm is not blamed as the origin");
+        my $where = quotemeta(__FILE__).' line '.$line;
+        like($err, qr/$where/,
+            "$what reports the caller position in this test file");
+    }
+
+    # The real thing, which is the likeliest way to reach this at all: one
+    # identity, passed bare because a single identity does not look like a
+    # list. Asserted on 31 characters, for the reason given above.
+    # Assertions by index() inside ok() again, for the reason written out over
+    # the same shape in the create block above: this is the one call in the
+    # distribution whose wrong argument is a whole secret key, so nothing here
+    # may print $err.
+    {
+        my ($err, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            eval { $header->unwrap_file_key($secret) };
+            $err = $@;
+        }
+
+        ok(index($err, $identities_msg) == 0,
+            'a bare, valid identity is a type error, not a silent success');
+        ok(index($err, substr($secret, 0, 31)) == -1,
+            'and no part of that secret key reaches the message');
+        ok(index($err, 'AGE-SECRET-KEY-1') == -1,
+            'not even the identity prefix');
+        is(scalar @warn, 0, 'and nothing warns out of Header.pm');
+    }
+
+    # Counter-proof that the cases above measure the type check and not a
+    # header that could not be unwrapped in the first place.
+    is($header->unwrap_file_key([$secret]), $file_key,
+        'the same identity inside an ArrayRef still unwraps the file key');
+}
+
 done_testing;
