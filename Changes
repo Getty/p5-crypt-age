@@ -1,6 +1,38 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Crypt::Age::Header->create now refuses an empty recipients ArrayRef
+    instead of returning a header with no stanzas. Passing [] satisfied the
+    shape check, wrapped the file key for nobody and produced a header of a
+    version line and a MAC over it. The age header grammar is "header =
+    v1-line 1*stanza end" -- one or more stanzas -- so that was not a valid
+    header, and the file it started could never be decrypted by anyone, the
+    caller included: the file key is generated per file and kept nowhere
+    else, so it went with the header. Nothing said so at the time. Measured
+    on a file built from such a header, rage 0.12.1 refuses it as "Unknown
+    age format" and age 1.2.1 parses it and reports "no identity matched any
+    of the recipients" -- both correct, both arriving after the plaintext is
+    the only copy and then gone. It now croaks "recipients must not be empty:
+    this method wraps the file key once per entry, so a header with no
+    stanzas can never be unwrapped, pass at least one recipient", after the
+    shape check and before the file key is touched. Only a caller using
+    Header->create directly is affected; encrypt, encrypt_file and
+    encrypt_filehandle have always rejected an empty list one layer up.
+    Those two guards in Crypt::Age move onto the same message form in this
+    release, so the empty list reads one way whichever layer catches it:
+    "at least one recipient required" becomes the message above with "this
+    method encrypts to every entry, so with none the result can never be
+    decrypted" as its reason, and "at least one identity required" becomes
+    "identities must not be empty: this method decrypts with whichever entry
+    matches, so with none there is nothing that could match, pass at least
+    one identity". Callers matching on either old text see the new one; both
+    checks accept and reject exactly what they did before, and both still
+    fire before any file key is generated or any header is parsed, so an
+    empty list still costs nothing but the exception. The identities side
+    closes no defect of its own -- Header->unwrap_file_key already died on an
+    empty list, with "No matching identity found", and still does. The POD of
+    create, encrypt, decrypt and encrypt_filehandle states the requirement
+    and quotes the messages.
   - Crypt::Age::Keys->decode_secret_key and ->decode_public_key no longer
     quote the human-readable part they decoded when it is not the expected
     one. Both croaked "Invalid secret key HRP: expected 'age-secret-key-',
@@ -45,9 +77,9 @@ Revision history for Crypt-Age
     with it, and as before nothing about the argument is interpolated -- a
     bare string in the identities parameter is a secret key. Only the text
     moves: both checks accept and reject exactly what they accepted and
-    rejected before, and the separate "at least one recipient required" and
-    "at least one identity required" emptiness checks are unchanged. The POD
-    of encrypt and decrypt now quotes both messages.
+    rejected before. The separate emptiness checks beside them move in the
+    same release, in the entry below. The POD of encrypt and decrypt now
+    quotes both messages.
   - Crypt::Age::Header->unwrap_file_key and ->create now require their list
     argument to really be an ArrayRef, and croak "identities must be an
     ArrayRef: this method tries each entry in turn, pass [$identity] rather

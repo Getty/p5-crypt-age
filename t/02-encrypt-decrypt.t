@@ -620,4 +620,124 @@ use Crypt::Age::Header;
     }
 }
 
+# Ticket #36 at this layer. The emptiness guards in _encrypt_fh and _decrypt_fh
+# predate the message form the distribution settled on across #31-#34 and #37,
+# and #36 adds the matching guard one layer down in Header::create. Leaving
+# these two on "at least one recipient required" would have rebuilt, for the
+# empty-list case, exactly the divergence #37 had just removed for the shape
+# case -- so all three move together and the empty list now reads one way
+# whichever layer catches it.
+#
+# What moved is the text. Both guards accept and reject exactly what they
+# accepted and rejected before, and both still fire before any file key is
+# generated or any header is parsed.
+{
+    my ($public, $secret) = Crypt::Age->generate_keypair;
+    my $ciphertext = Crypt::Age->encrypt(
+        plaintext  => 'ticket #36 fixture',
+        recipients => [$public],
+    );
+
+    my $recipients_empty_msg = 'recipients must not be empty: this method '
+        .'encrypts to every entry, so with none the result can never be '
+        .'decrypted, pass at least one recipient';
+    my $identities_empty_msg = 'identities must not be empty: this method '
+        .'decrypts with whichever entry matches, so with none there is '
+        .'nothing that could match, pass at least one identity';
+
+    # _encrypt_fh and _decrypt_fh hold the only copy of each guard, so every
+    # public entry point below has to arrive at the same message. croak
+    # reports the frame that called the public method, which is the closure
+    # and not the eval running it, so each closure records its own line on the
+    # same physical line as the call.
+    my $call_line;
+    my @cases = (
+        {   what => 'encrypt',
+            msg  => $recipients_empty_msg,
+            call => sub {
+                $call_line = __LINE__; Crypt::Age->encrypt(plaintext => 'x', recipients => []);
+            },
+        },
+        {   what => 'encrypt_filehandle',
+            msg  => $recipients_empty_msg,
+            call => sub {
+                my $in = 'x'; my $out = '';
+                open my $ifh, '<:raw', \$in  or die $!;
+                open my $ofh, '>:raw', \$out or die $!;
+                $call_line = __LINE__; Crypt::Age->encrypt_filehandle(input => $ifh, output => $ofh, recipients => []);
+            },
+        },
+        {   what => 'decrypt',
+            msg  => $identities_empty_msg,
+            call => sub {
+                $call_line = __LINE__; Crypt::Age->decrypt(ciphertext => $ciphertext, identities => []);
+            },
+        },
+        {   what => 'decrypt_filehandle',
+            msg  => $identities_empty_msg,
+            call => sub {
+                my $out = '';
+                open my $ifh, '<:raw', \$ciphertext or die $!;
+                open my $ofh, '>:raw', \$out       or die $!;
+                $call_line = __LINE__; Crypt::Age->decrypt_filehandle(input => $ifh, output => $ofh, identities => []);
+            },
+        },
+    );
+
+    for my $case (@cases) {
+        my ($what, $msg) = @{$case}{qw( what msg )};
+
+        my ($err, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            undef $call_line;
+            eval { $case->{call}->() };
+            $err = $@;
+        }
+
+        like($err, qr/^\Q$msg\E(?: at |\z)/,
+            "$what: an empty list is rejected with exactly the documented message");
+        is_deeply(\@warn, [], "$what: and nothing warns on the way");
+        unlike($err, qr{Crypt/Age\.pm},
+            "$what: it croaks -- Crypt/Age.pm is not blamed as the origin");
+        my $where = quotemeta(__FILE__).' line '.$call_line;
+        like($err, qr/$where/,
+            "$what: and it reports the caller position in this test file");
+    }
+
+    # The guard fires before anything is written, so an empty list costs the
+    # caller nothing beyond the exception -- no header, no nonce, no partial
+    # file. This is what makes it a rejection rather than a truncation.
+    {
+        my $in = 'x'; my $out = 'sentinel';
+        open my $ifh, '<:raw', \$in  or die $!;
+        open my $ofh, '>:raw', \$out or die $!;
+        eval { Crypt::Age->encrypt_filehandle(input => $ifh, output => $ofh, recipients => []) };
+        is($out, '', 'encrypt_filehandle writes no byte before refusing an empty list');
+    }
+
+    # Counter-proof that the block measures the emptiness guards and not an
+    # API that stopped working.
+    is(Crypt::Age->decrypt(ciphertext => $ciphertext, identities => [$secret]),
+        'ticket #36 fixture', 'a single-entry list still round-trips');
+
+    # And the POD claims what the code emits, the same pin #27 and #37 put on
+    # their messages. Read the module that was actually loaded, not a path
+    # guessed from cwd.
+    my $flat = do {
+        open my $pod_fh, '<:raw', $INC{'Crypt/Age.pm'}
+            or die "cannot read the loaded Crypt::Age: $!";
+        local $/;
+        my $source = <$pod_fh>;
+        $source =~ s/\s+/ /g;    # the POD wraps; the quoted message does not
+        $source;
+    };
+
+    for my $quoted ($recipients_empty_msg, $identities_empty_msg) {
+        ok(index($flat, $quoted) >= 0,
+            'Crypt::Age POD quotes "'.$quoted.'"');
+    }
+}
+
 done_testing;

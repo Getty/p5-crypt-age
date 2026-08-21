@@ -115,6 +115,22 @@ sub create {
         .'once per entry, pass [$recipient] rather than $recipient'
         if ref $recipients ne 'ARRAY';
 
+    # The spec's header grammar is "header = v1-line 1*stanza end": one or
+    # more stanzas, never zero. An empty list satisfied the check above and
+    # returned a header of a version line and a MAC over it, wrapping the file
+    # key for nobody -- so the file it starts can never be decrypted, by the
+    # caller least of all, since the file key is generated per file and kept
+    # nowhere else. Measured on a file built from such a header: rage 0.12.1
+    # refuses it as "Unknown age format" because the grammar is not satisfied,
+    # age 1.2.1 parses it and fails with "no identity matched any of the
+    # recipients". Both are right, and both say so once the plaintext is gone.
+    #
+    # Same skeleton as the check above, carrying this method's own reason.
+    croak 'recipients must not be empty: this method wraps the file key once '
+        .'per entry, so a header with no stanzas can never be unwrapped, '
+        .'pass at least one recipient'
+        unless @$recipients;
+
     my @stanzas;
     for my $i (0 .. $#{$recipients}) {
         my $recipient = $recipients->[$i];
@@ -201,6 +217,19 @@ parameter is normally a public key, but the mistake that puts a bare string
 here is the same one that swaps recipient and identity, which is why the
 per-entry croak below reports that swap. See L</unwrap_file_key>, where the
 value is never public.
+
+An B<empty> ArrayRef is refused as well, with C<"recipients must not be empty:
+this method wraps the file key once per entry, so a header with no stanzas can
+never be unwrapped, pass at least one recipient">. It used to be accepted: it
+passed the shape check, wrapped the file key for nobody, and returned a header
+consisting of a version line and a MAC over it. The age header grammar is
+C<header = v1-line 1*stanza end> -- one or more stanzas -- so that was not a
+valid header at all, and the file it started could never be decrypted by
+anyone, the caller included, because the file key is generated per file and
+kept nowhere else. C<rage> 0.12.1 refuses such a file as C<"Unknown age
+format">; C<age> 1.2.1 parses it and reports C<"no identity matched any of the
+recipients">. Both arrive after the plaintext is unrecoverable, which is why
+this is refused here instead.
 
 Returns a L<Crypt::Age::Header> object with stanzas for each recipient and a
 computed MAC.

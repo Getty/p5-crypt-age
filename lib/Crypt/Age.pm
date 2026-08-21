@@ -187,6 +187,14 @@ pass [$recipient] rather than $recipient">. As elsewhere in this distribution
 the clause after the colon carries the requirement and its reason rather than a
 description of what arrived, and quotes no part of the argument.
 
+It must also be non-empty, and is refused with C<"recipients must not be
+empty: this method encrypts to every entry, so with none the result can never
+be decrypted, pass at least one recipient">. That message replaces the older
+C<"at least one recipient required">; the check itself is unchanged and has
+always been there. Encrypting to nobody produces a file whose file key is
+wrapped for no one and therefore lost with the plaintext, and the age header
+grammar requires at least one recipient stanza in any case.
+
 The returned data can be written to a file or transmitted directly.
 
 C<plaintext> and the returned ciphertext are both held in memory in full. For
@@ -264,6 +272,12 @@ with C<"identities must be an ArrayRef: this method decrypts with whichever
 entry matches, pass [$identity] rather than $identity">, which quotes no byte
 of the argument: a bare string in this parameter is a secret key.
 
+It must also be non-empty, and is refused with C<"identities must not be
+empty: this method decrypts with whichever entry matches, so with none there is
+nothing that could match, pass at least one identity">. That message replaces
+the older C<"at least one identity required">, so that an empty list reads the
+same way on both sides of the API; the check itself is unchanged.
+
 The method tries each identity against each recipient stanza in the header until
 one successfully unwraps the file key. Dies on the same conditions as
 L</decrypt_file>, except file I/O errors -- this method never opens a file. It
@@ -307,7 +321,16 @@ sub _encrypt_fh {
     croak 'recipients must be an ArrayRef: this method encrypts to every '
         .'entry, pass [$recipient] rather than $recipient'
         if ref($recipients) ne 'ARRAY';
-    croak "at least one recipient required" unless @$recipients;
+    # The emptiness case, moved onto the same skeleton in the same change that
+    # gave Header::create a guard of its own. Leaving it on its old wording
+    # would have rebuilt, for the empty list, exactly the divergence the shape
+    # checks above were just brought out of. The reason is this layer's again:
+    # what a caller of encrypt sees is not a header without stanzas but a
+    # result nobody can open.
+    croak 'recipients must not be empty: this method encrypts to every entry, '
+        .'so with none the result can never be decrypted, pass at least one '
+        .'recipient'
+        unless @$recipients;
 
     # Generate random file key
     my $file_key = Crypt::Age::Primitives->generate_file_key;
@@ -418,11 +441,12 @@ The output stream will be in age format and can be decrypted with the C<age> or
 C<rage> command-line tools.
 
 Returns C<1> on success. Dies if a required argument is missing, if
-C<recipients> is not a non-empty ArrayRef, if a recipient string is not a
-valid Bech32 C<age1...> public key, or if C<binmode> fails on either handle.
-Unlike L</encrypt_file>, this method never opens or closes a file itself --
-C<input> and C<output> are handles the caller already has open -- so it cannot
-die with a "file not found" or "permission denied" error; that is the
+C<recipients> is not a non-empty ArrayRef -- L</encrypt> quotes the two
+messages, one for the shape and one for the empty list -- if a recipient string
+is not a valid Bech32 C<age1...> public key, or if C<binmode> fails on either
+handle. Unlike L</encrypt_file>, this method never opens or closes a file
+itself -- C<input> and C<output> are handles the caller already has open -- so
+it cannot die with a "file not found" or "permission denied" error; that is the
 caller's concern before the handle is passed in. Streams in 64 KiB chunks, so
 memory use does not grow with the amount of data written.
 
@@ -447,7 +471,15 @@ sub _decrypt_fh {
     croak 'identities must be an ArrayRef: this method decrypts with '
         .'whichever entry matches, pass [$identity] rather than $identity'
         if ref($identities) ne 'ARRAY';
-    croak "at least one identity required" unless @$identities;
+    # The counterpart, in the same form and moved in the same change. Unlike
+    # the recipients side this one closes no defect: unwrap_file_key already
+    # croaks "No matching identity found" for an empty list -- measured, not
+    # assumed -- so nothing was ever silently accepted here. It moves so that
+    # the empty list reads one way on both sides of the API.
+    croak 'identities must not be empty: this method decrypts with whichever '
+        .'entry matches, so with none there is nothing that could match, '
+        .'pass at least one identity'
+        unless @$identities;
 
     # Parse header
     my $header = Crypt::Age::Header->parse_from_fh($ifh);

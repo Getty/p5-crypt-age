@@ -1121,4 +1121,74 @@ my $identities_msg = 'identities must be an ArrayRef: this method tries each '
         'the same identity inside an ArrayRef still unwraps the file key');
 }
 
+# Ticket #36, the last of this series. create checked the shape of its
+# recipients list, above, but never its length. An empty ArrayRef passed every
+# check and returned a header with no stanzas at all -- a version line and a
+# MAC over it -- which wraps the file key for nobody. The spec's grammar is
+# "header = v1-line 1*stanza end", one or more, so that is not a useless
+# header, it is not a header. Measured on a file built from one: rage 0.12.1
+# refuses it outright as "Unknown age format", age 1.2.1 parses it and then
+# reports "no identity matched any of the recipients". Both are right, and both
+# say so long after the file key -- which exists only inside that file -- was
+# the last way back to the plaintext.
+my $recipients_empty_msg = 'recipients must not be empty: this method wraps '
+    .'the file key once per entry, so a header with no stanzas can never be '
+    .'unwrapped, pass at least one recipient';
+
+{
+    my ($public, $secret) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+
+    my ($err, $line, @warn);
+    {
+        local $SIG{__WARN__} = sub { push @warn, $_[0] };
+        local $@;
+        $line = __LINE__ + 1;
+        eval { Crypt::Age::Header->create($file_key, []) };
+        $err = $@;
+    }
+
+    # The whole message up to croak's " at FILE line N." tail, not a prefix:
+    # a wording that drifts, or picks up an interpolated suffix, stops
+    # matching here.
+    like($err, qr/^\Q$recipients_empty_msg\E(?: at |\z)/,
+        'an empty recipients list is refused with exactly the documented message');
+    is_deeply(\@warn, [], 'and nothing warns on the way');
+    unlike($err, qr{Crypt/Age/Header\.pm},
+        'it croaks: Header.pm is not blamed as the origin');
+    my $where = quotemeta(__FILE__).' line '.$line;
+    like($err, qr/$where/, 'and it reports the caller position in this test file');
+
+    # The claim the assertion above replaces. Before the fix this call
+    # returned a Crypt::Age::Header with zero stanzas, and it was that object
+    # -- not an exception -- that made the file it started unrecoverable, so
+    # the regression to guard against is a silent success, not a wrong text.
+    my $built = eval { Crypt::Age::Header->create($file_key, []) };
+    is($built, undef, 'and no header object is returned for an empty list');
+
+    # The shape check fires first for anything that is not an ArrayRef, so the
+    # two messages answer two different mistakes and cannot be confused.
+    eval { Crypt::Age::Header->create($file_key, {}) };
+    like($@, qr/^\Q$recipients_msg\E\b/,
+        'a non-ArrayRef is still answered by the shape check, not the emptiness one');
+
+    # Counter-proof that the block measures the emptiness check and not a
+    # create that stopped working.
+    my $header = Crypt::Age::Header->create($file_key, [$public]);
+    is(scalar @{$header->stanzas}, 1,
+        'a single-entry list still produces exactly one stanza');
+    is($header->unwrap_file_key([$secret]), $file_key,
+        'and the header it builds still unwraps');
+
+    # unwrap_file_key, measured rather than assumed while fixing #36, and left
+    # alone because it is not the same defect: an empty identity list is
+    # already fatal there, so nothing is silently accepted and nothing is
+    # lost. Pinned here so that stays true -- if this ever returns instead of
+    # dying, the read side has grown the defect the write side just lost.
+    my $unwrapped = eval { $header->unwrap_file_key([]) };
+    is($unwrapped, undef, 'an empty identities list unwraps nothing');
+    like($@, qr/No matching identity found/,
+        'and is fatal already, which is why unwrap_file_key is not part of this fix');
+}
+
 done_testing;
