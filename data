@@ -1,0 +1,43 @@
+---
+class: standard
+completed: 2026-08-21T03:42:19Z
+created: 2026-08-21T01:40:38Z
+id: 33
+priority: low
+started: 2026-08-21T03:25:52Z
+status: done
+tags:
+- api
+title: Header::parse warns ten times out of Header.pm for a ScalarRef to an undefined
+  scalar
+updated: 2026-08-21T03:42:19Z
+---
+
+Found while measuring #31, deliberately not fixed there -- one ticket, one change.
+
+Crypt::Age::Header->parse(\my $undef, \my $off) passes the #31 type check (the argument really is a ScalarRef) and the #30 wide-character scan, then emits ten warnings from inside Header.pm before it croaks:
+
+  Use of uninitialized value in pattern match at Header.pm line 443
+  Use of uninitialized value in <HANDLE> at Header.pm line 245   (x7)
+  ... chomp / string eq warnings
+  croak "Invalid age version: ..."
+
+The type is right; the content is empty. The croak at the end is correct and should stay -- an undefined scalar is not an age file. What is wrong is the ten warnings before it: they are emitted from Header.pm line numbers, so they blame the module for a mistake made one frame up, and they are noise a caller cannot act on.
+
+Distinct from an empty-string $data, which is a legitimate "not an age file" input and should keep producing the plain croak with no warnings. Check that path stays warning-free too while fixing this one -- it may share the cause.
+
+Fix shape: decide whether an undefined referent is its own croak (naming the cause, no caller input echoed, message style of the #26/#28/#30/#31 series) or is normalized to the empty string and left to the existing version-line croak. Either way the warnings must be gone, asserted with is_deeply(\@warn, []) the way the #28/#30/#31 blocks do it, not silenced with a no warnings pragma. Regression test in t/03-header.t.
+2026-08-21 03:39 Fixed in the working tree (uncommitted, beside the #32 changes).
+
+Two causes, not one -- the ticket's suspicion that the neighbour path shares a cause was right, and stronger than it assumed.
+
+Measured before: parse(\my $undef, \my $off) = 10 warnings; an EMPTY-string $data = 2 warnings, not 0. The ticket assumed the empty-string path was already clean. It was not: the last 2 of the 10 (chomp and string eq on $version_line) come from parse_from_fh, where readline returns undef at end of input, and they reach the public string API -- Crypt::Age->decrypt(ciphertext => '') warned twice out of Header.pm.
+
+1. parse: an undefined referent now gets its own croak, placed after both #31/#32 shape checks and before the byte-string scan. Chose the own croak over normalizing to '': a ref to nothing is a mistake in the call, empty bytes are a statement about data that arrived, and the two have different fixes. Message follows the series form (requirement + reason + fix after the colon, nothing interpolated).
+2. parse_from_fh: an absent first line is carried into the existing version check instead of warning on the way. Message unchanged; only the warnings are gone.
+
+Measured after: all four paths (undef referent, empty $data, parse_from_fh at EOF, decrypt with empty ciphertext) = 0 warnings, correct croaks.
+
+Regression block in t/03-header.t, red-verified first (6 failures), now green. Includes the empty-string case as the side-by-side assertion and a parse_from_fh-at-EOF case on the line the second fix sits on. POD updated on =method parse and =method parse_from_fh; two Changes entries under {{$NEXT}}.
+
+Proof: prove -lr t/ 669/669 PASS; prove -lv t/07-testkit.t 144 PASS (68 vectors run, 75 skipped); prove -lv t/04-interop.t 120 PASS against both age 1.2.1 and rage 0.12.1. dzil build clean, woven author-pod-syntax.t passes. No commit, no release. #34 untouched.
