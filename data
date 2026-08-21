@@ -1,0 +1,48 @@
+---
+claimed_at: 2026-08-21T01:30:23Z
+claimed_by: crypt-age-worker
+class: standard
+completed: 2026-08-21T03:25:40Z
+created: 2026-08-21T01:19:41Z
+id: 30
+priority: low
+started: 2026-08-21T01:21:43Z
+status: done
+tags:
+- api
+- docs
+title: Header::parse warns and hides the cause for a wide-character data ref
+updated: 2026-08-21T03:25:40Z
+---
+
+Third instance of the defect class #26 (Crypt::Age::encrypt/decrypt) and #28 (Primitives::encrypt_payload/decrypt_payload) closed. Found while doing #28, deliberately not fixed there -- one ticket, one change.
+
+Crypt::Age::Header->parse($data_ref, $offset_ref) maps the caller string into an in-memory handle (Header.pm:425):
+
+    open my $fh, "<:raw", $data_ref or croak "Invalid age input: cannot read";
+
+Measured with a "\x{100}" data ref: perl warns "Strings with code points over 0xFF may not be mapped into in-memory file handles", the open fails, and the croak reads "Invalid age input: cannot read" -- true but silent about the cause, and the warning fires at the caller regardless.
+
+Not a copy of the #26/#28 fix, which is why it is its own ticket: those two hold a *copy* of the caller string (list assignment off @_), so utf8::downgrade mutates only their own scalar and the caller sees nothing. Here the parameter is a scalar *ref*, so downgrading through it would convert the caller own variable in place. The value would be unchanged and perl own open would have done the same conversion on success -- but it is the caller scalar, not ours, and encrypt/decrypt were careful precisely about that. Decide deliberately between:
+  - checking without mutating (a /[^\x00-\xff]/ scan on $$data_ref), paying for a scan the successful path then repeats, or
+  - downgrading through the ref and documenting that parse may downgrade the representation of the scalar it is given.
+
+Whichever way: a message naming the cause and the fix, no caller input echoed, plus POD on =method parse saying the referenced scalar must hold bytes. Regression test alongside the #28 block in t/05-primitives.t, or in t/03-header.t where parse is covered.
+2026-08-21 01:30 Implemented the non-mutating scan as decided, but one premise in the ticket is measured false and the deliverables were adjusted accordingly -- read this before reviewing.
+
+MEASURED CORRECTION. The choice between the scan and utf8::downgrade through the ref makes NO observable difference to the callers scalar. PerlIO::scalar downgrades the referenced scalar in place at open time (perl 5.40.1: is_utf8 goes 1 -> 0 on the open, before any read), so on the success path an upgraded-within-Latin-1 $data comes back unflagged either way; on the rejection path utf8::downgrade($x, 1) leaves the string untouched, so it comes back flagged either way. Read-only scalars behave identically for both (downgrade succeeds on a readonly SV -- the value is unchanged). So:
+  * the tickets factual claim -- downgrade through the ref would convert the callers variable -- is true, and the scan is a fine choice; implemented as decided.
+  * the consequence the ticket drew from it is not. Deliverable 2 asked the POD to state that parse does not touch the callers scalar, and deliverable 3 asked a test asserting it comes back flagged after a successful parse. Both are FALSE of the current code. Documenting or asserting them would have shipped a false claim, so the POD instead says what is true: the check only reads $data, a rejected $data is left exactly as it was, and on the success path perls own open downgrades it in place as it always did. The counter-proof test asserts !is_utf8 after a successful parse and says in its comment that this is perls doing, not ours. The flagged-after-rejection assertion -- the one property the scan really does buy -- is in the rejection block.
+
+Confirmed independently: the perf numbers (200 passes over 16 MiB, 0.00s CPU unflagged vs 11.37s flagged, ticket said 11.06s) and the no-internal-callers claim (lib/ reaches the parser through parse_from_fh only; the two ->parse( in lib/ are the SYNOPSIS and the =method example, both POD).
+
+OUT OF SCOPE, RAISED AS #31. The scan is guarded on ref eq "SCALAR". Without the guard, a non-ref first argument would croak with perls strict-refs message, which quotes the callers own input -- a leak this change must not introduce. The guard keeps a plain string, undef and other refs reaching the open exactly as before; t/03-header.t characterizes that. #31 covers fixing it properly, including that a plain string currently makes open read a FILE of that name.
+
+Changed: lib/Crypt/Age/Header.pm (check + =method parse POD), t/03-header.t (three blocks), Changes. No commit made.
+
+Verified red before green: with the check stashed, t/03-header.t fails 3 of 144 (new message, no cannot-read passthrough, no >0xFF warning).
+
+Runs, all on this machine with age 1.2.1 and rage 0.12.1 both on PATH:
+  prove -lr t/          PASS, 8 files, 617 tests, 0 skipped
+  prove -lv t/07-testkit.t  PASS, 144 tests; 68 vectors run (68 pass, 0 fail), 75 skipped (33 armor, 42 scrypt/hybrid)
+  prove -lv t/04-interop.t  RAN, did not skip. PASS, 120 tests = 60 [age] + 60 [rage], both binaries exercised.
