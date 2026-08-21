@@ -1,0 +1,32 @@
+---
+class: standard
+completed: 2026-08-21T03:55:10Z
+created: 2026-08-21T03:32:23Z
+id: 34
+priority: high
+started: 2026-08-21T03:42:34Z
+status: done
+tags:
+- security
+- api
+title: Header::unwrap_file_key leaks 32 characters of a secret key into perl's error
+  message
+updated: 2026-08-21T03:55:10Z
+---
+
+Found while doing #32, verified independently with a fabricated key.
+
+Crypt::Age::Header->unwrap_file_key($identities) dereferences its parameter as an array without checking it (Header.pm:603). A caller who passes a bare identity string instead of an arrayref gets perl's strict-refs message, which quotes the first 32 characters of the argument:
+
+    Can't use string ("AGE-SECRET-KEY-1FAKEFAKEFAKEFAKE"...) as an ARRAY ref while "strict refs" in use at lib/Crypt/Age/Header.pm line 603.
+
+That is secret key material in an error message, against the house rule that keys, identities and plaintext never land in logs, commit messages or ticket bodies. Error text reaches logs, bug reports and terminal scrollback; a caller cannot redact what a croak from inside the module already wrote. The message also blames Header.pm for a mistake made one frame up.
+
+Header->create($file_key, $recipients) (Header.pm:98) has the identical shape one line of reasoning away. The recipient is a public key, so that one is not a secret leak, but it is still caller input echoed from inside the module -- fix both in this ticket, they are one change.
+
+Note the scope: Crypt::Age::_encrypt_fh and _decrypt_fh already guard with ref(...) eq "ARRAY" before their @$ dereference, so the string, file and filehandle API is unaffected. These two are reachable by calling the Header methods directly, which the POD documents as public.
+
+Fix shape: croak naming the parameter and the fix when ref ne "ARRAY", before the dereference, no caller input interpolated, matching the message style settled in #31/#32 -- the clause after the colon carries the requirement and its reason, not a claim about what arrived.
+
+Trap for the regression test, learned in #32: perl truncates the quoted string in "Can't use string (...)" at 32 characters. A marker longer than that never appears in the message, so a "no caller input leaked" assertion built on it passes even in the red state and can never fail. Use a marker of 31 characters or fewer and verify red-before-green.
+2026-08-21 03:53 Fixed. Header::create and Header::unwrap_file_key now croak 'recipients/identities must be an ArrayRef: <requirement and reason>, pass [$x] rather than $x' before the dereference, in the message form settled by #31/#32/#33 -- nothing interpolated. POD on both methods states the requirement and why unwrap_file_key's is a confidentiality check. Regression block in t/03-header.t: 29 assertions red before the fix, green after; markers kept under perl's 32-character truncation, and the real-key cases assert on a 31-character prefix via ok(index(...)) rather than like/unlike, because a failing like() prints the value it was given and would have reproduced the leak in the test output (measured -- the first draft did exactly that). Scope claim verified empirically: all six public entry points (encrypt/decrypt, _file, _filehandle) are stopped by Crypt::Age's own ArrayRef checks, none reaches Header.pm with a bare string. Runs: prove -lr t/ 721 tests PASS; t/07-testkit.t 144 PASS (68 vectors run, 75 skipped); t/04-interop.t RAN, 120 tests, 60 [age] 1.2.1 + 60 [rage] 0.12.1, PASS. Not committed. One adjacent finding for the report, no ticket filed per instruction.
