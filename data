@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-08-21T01:17:57Z
+claimed_by: crypt-age-doc-writer
+class: standard
+completed: 2026-08-21T03:25:36Z
+created: 2026-08-20T15:51:17Z
+id: 29
+priority: low
+started: 2026-08-21T01:14:42Z
+status: done
+tags:
+- docs
+title: Crypt::Age =method decrypt under-lists its failure modes
+updated: 2026-08-21T03:25:36Z
+---
+
+Found while auditing the error prose for #27, not fixed there (that ticket was scoped to the recipient message in the LIMITATIONS section).
+
+lib/Crypt/Age.pm, =method decrypt:
+
+    The method tries each identity against each recipient stanza in the header
+    until one successfully unwraps the file key. Dies if no matching identity is
+    found or if the MAC verification fails.
+
+Nothing there is wrong, and both named modes are real. It is incomplete: decrypt also dies on an invalid version line, on a structurally invalid stanza, on payload authentication failure at a chunk, on an empty payload, and now on a ciphertext holding a code point above 0xFF (#26). =method decrypt_file and =method decrypt_filehandle already list the fuller set, so the three descriptions of the same failure surface disagree on length.
+
+Worth aligning the three, or reducing decrypt to a reference to one of them, rather than maintaining three lists.
+
+Audited and found current in the same pass, no action needed: the "No matching identity found" quote, the literal age-encryption.org/v1 version line claim, the unwrap_file_key X25519-only claim, and the encrypt_file / encrypt_filehandle / decrypt_file / decrypt_filehandle failure lists.
+Aligned =method decrypt's failure list in lib/Crypt/Age.pm with decrypt_file/decrypt_filehandle (left unchanged, per audit). Verified every claim against code: Header::parse_from_fh (version line, stanza structure), Header::unwrap_file_key (no-match/MAC), Primitives::decrypt_payload_fh (chunk auth failure incl. empty payload), and the utf8::downgrade check in Crypt::Age::decrypt (#26). Reduced decrypt's dies-sentence to a reference to L</decrypt_file> instead of a third prose list, per the ticket's stated preference. prove -lr t/ green: 8 files, 574 tests, incl. t/04-interop.t against age 1.2.1 + rage 0.12.1 (not skipped) and t/07-testkit.t 68/68. No code touched; Primitives.pm left alone for the parallel agent.
