@@ -1,6 +1,39 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Crypt::Age::Header->parse now requires its first argument to really be a
+    ScalarRef and croaks "data must be a ScalarRef: this method opens it, and a
+    plain string is a filename, pass \$data rather than $data" for every other
+    shape. The argument used to go straight to open, where a plain string is a
+    FILENAME: a caller who wrote parse($data, \$offset) without the backslash
+    opened and parsed the file that string named -- returning a header built
+    from that file's bytes and advancing the caller's offset -- instead of
+    getting a type error, and where the string named nothing readable the
+    misuse was reported as "Invalid age input: cannot read". undef no longer
+    warns "Use of uninitialized value" out of Header.pm about a mistake made
+    one frame up, and another kind of ref no longer arrives as "cannot read"
+    either, which named neither cause nor fix. The message quotes no part of
+    the argument, which on this path is either ciphertext or a filesystem path.
+    The POD of parse now states the requirement.
+  - Crypt::Age::Header->parse now rejects a ScalarRef whose scalar holds a code
+    point above 0xFF with a message naming the cause and the fix --
+    "data must be a byte string: it holds a code point above 0xFF, read it with
+    :raw rather than decoding it" -- instead of "Invalid age input: cannot
+    read", which named neither, and perl's "code points over 0xFF" warning no
+    longer fires. Unlike the same check in encrypt, decrypt, encrypt_payload
+    and decrypt_payload, this one only reads the caller's scalar and never
+    downgrades it, since it is not a copy; note that on the success path perl's
+    own in-memory open still downgrades it in place, as it always did. The POD
+    of parse now states the byte-string requirement.
+  - Crypt::Age::Primitives::encrypt_payload and decrypt_payload now reject a
+    character string the way encrypt and decrypt already do, with a message
+    naming the cause and the fix -- "plaintext must be a byte string: it holds a
+    code point above 0xFF, encode it before passing it in", and the ciphertext
+    counterpart advising :raw rather than decoding -- instead of passing perl's
+    EINVAL through from the in-memory open as "Cannot open input string: Invalid
+    argument". Perl's own "code points over 0xFF" warning no longer fires
+    either, because the check runs before the open. The POD of both methods now
+    states the byte-string requirement.
   - encrypt and decrypt now reject a character string with a message that names
     the cause and the fix, instead of passing perl's EINVAL through from the
     in-memory open: "plaintext must be a byte string: it holds a code point

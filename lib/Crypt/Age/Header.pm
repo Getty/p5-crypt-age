@@ -422,6 +422,44 @@ interface; see L</parse> for that entry point.
 
 sub parse {
     my ($class, $data_ref, $offset_ref) = @_;
+
+    # The type test perl's open does not do for us. Everything below assumes a
+    # ScalarRef -- the scan dereferences it, and the open maps it into an
+    # in-memory handle -- but open silently means something else for every
+    # other shape, and the wrong meanings are worse than an error: a plain
+    # string is a *filename*, so a caller who drops the backslash reads the
+    # file that string names, measured here as parse returning a header built
+    # from that file and advancing the caller's $offset past it. A blessed
+    # SCALAR ref stringifies into a filename the same way, a REF reads back the
+    # address of the inner ref, and undef warned out of this module about a
+    # mistake made one frame up. So: ref eq 'SCALAR', the only shape that maps
+    # to the bytes the caller meant -- open takes a REF too, it just reads
+    # something else -- checked before anything touches the argument.
+    #
+    # Never interpolate $data_ref. This is the one path where perl's own
+    # message would do it for us -- the string it would quote is either the
+    # ciphertext the caller meant to pass or a filesystem path.
+    croak 'data must be a ScalarRef: this method opens it, and a plain string '
+        .'is a filename, pass \$data rather than $data'
+        if ref $data_ref ne 'SCALAR';
+
+    # Perl's own test for the in-memory open below, hoisted so the failure
+    # names its cause instead of arriving as "cannot read". The reasoning is
+    # written out over the same check in Crypt::Age::encrypt; the delta here is
+    # the mechanism. That one may downgrade because it holds a copy off @_, and
+    # "our own copy" is the whole safety argument -- it does not carry when the
+    # parameter is the caller's scalar behind a ref, so this reads instead of
+    # converting. The scan is free on the unflagged byte string this is
+    # normally given (200 passes over 16 MiB: 0.00s CPU, against 11.4s on a
+    # flagged one), and nothing internal repeats it -- lib/ reaches the parser
+    # through parse_from_fh, so parse has no caller here. It buys less than it
+    # looks: on success perl's open downgrades the referenced scalar in place
+    # anyway, so what is ours is only that a rejected $data is left as it was.
+    # Dereferencing needs no guard of its own: the check above settled the type.
+    croak 'data must be a byte string: it holds a code point above 0xFF, '
+        .'read it with :raw rather than decoding it'
+        if $$data_ref =~ /[^\x00-\xff]/;
+
     open my $fh, '<:raw', $data_ref or croak "Invalid age input: cannot read";
     seek($fh, $$offset_ref // 0, 0);
     my $retval = $class->parse_from_fh($fh);
@@ -447,6 +485,18 @@ Parameters:
 
 =back
 
+C<\$data> must really be a ScalarRef. Anything else is rejected before the
+data is looked at, with C<"data must be a ScalarRef: this method opens it, and
+a plain string is a filename, pass \$data rather than $data">. That names the
+reason the check exists rather than describing what arrived: this method opens
+a filehandle on its first argument, and perl maps only an unblessed SCALAR ref
+into memory -- a plain string is a B<filename>, so a caller who wrote
+C<parse($data, \$offset)> without the backslash used to read the file that
+string names, and got a header parsed out of it rather than a type error.
+C<undef>, a blessed scalar ref, a ref to a ref and every other shape are
+refused by the same check and get the same message. It quotes no part of the
+argument, since here that argument is either ciphertext or a path.
+
 Returns a L<Crypt::Age::Header> object. The C<$offset> is updated to point to
 the start of the payload.
 
@@ -461,6 +511,22 @@ the identity. See L<Crypt::Age::Stanza::X25519/BUILD>.
 Stanzas of unrecognized types are kept as plain L<Crypt::Age::Stanza> objects
 and are not validated beyond the structure every stanza shares; the format
 requires them to be ignored, not rejected.
+
+The scalar C<\$data> refers to must hold B<bytes>. One holding a code point
+above C<0xFF> cannot be mapped into a filehandle at all and is rejected before
+anything else happens, with C<"data must be a byte string: it holds a code
+point above 0xFF, read it with :raw rather than decoding it">; see
+L<Crypt::Age/decrypt> for what this check does and does not catch.
+
+Unlike the same check in L<Crypt::Age/encrypt>, L<Crypt::Age/decrypt> and
+L<Crypt::Age::Primitives/encrypt_payload>, which downgrade a copy of the
+string they were passed, this one only B<reads> C<$data>: it is the caller's
+own scalar, not ours. On the success path that buys nothing observable --
+perl's in-memory C<open> downgrades the referenced scalar in place, so a
+C<$data> stored upgraded whose code points all fit in a byte comes back
+downgraded whether this check is there or not. What it does guarantee is that
+a B<rejected> C<$data> is left exactly as the caller had it, and that the
+conversion on the success path stays perl's rather than this method's.
 
 =cut
 

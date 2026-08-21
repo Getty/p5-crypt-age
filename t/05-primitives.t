@@ -224,6 +224,100 @@ use Crypt::Age::Primitives;
     }
 }
 
+# Ticket #28, the Primitives-level form of what #26 fixed in Crypt::Age: these
+# two methods take bytes. Both map the caller's string into an in-memory
+# handle, and perl refuses to map one holding a code point above 0xFF -- it
+# warned "Strings with code points over 0xFF may not be mapped into in-memory
+# file handles", the open then failed with EINVAL, and the croak read "Cannot
+# open input string: Invalid argument", which names no cause and suggests no
+# fix. Both now run perl's own downgrade test before the open and say what is
+# wrong; the open is never reached on this path, so the warning is gone too --
+# asserted, not suppressed.
+#
+# The output-side opens write into a lexical the method owns and are not
+# reachable from a caller, so they are deliberately not covered here.
+{
+    my $payload_key = pack('H*', '00' x 32);
+    my $wide = "\x{100} not bytes";
+
+    my ($enc_err, $enc_line, @enc_warn);
+    {
+        local $SIG{__WARN__} = sub { push @enc_warn, $_[0] };
+        local $@;
+        $enc_line = __LINE__ + 1;
+        eval { Crypt::Age::Primitives->encrypt_payload($payload_key, $wide) };
+        $enc_err = $@;
+    }
+
+    ok($enc_err, 'encrypt_payload with a wide-character plaintext dies');
+    like($enc_err,
+        qr/^plaintext must be a byte string: it holds a code point above 0xFF, encode it before passing it in\b/,
+        'the message names the parameter, the cause and the fix, not EINVAL');
+    unlike($enc_err, qr/Invalid argument/,
+        'encrypt_payload no longer passes perl\'s EINVAL through');
+    is_deeply(\@enc_warn, [],
+        'the check runs before the open, so perl emits no >0xFF warning');
+    unlike($enc_err, qr{Crypt/Age/Primitives\.pm},
+        'encrypt_payload croaks: Primitives.pm is not blamed as the origin');
+    my $enc_where = quotemeta(__FILE__).' line '.$enc_line;
+    like($enc_err, qr/$enc_where/,
+        'encrypt_payload reports the caller position in this test file');
+    ok(index($enc_err, 'not bytes') == -1,
+        'no part of the plaintext appears in the error');
+
+    my ($dec_err, $dec_line, @dec_warn);
+    {
+        local $SIG{__WARN__} = sub { push @dec_warn, $_[0] };
+        local $@;
+        $dec_line = __LINE__ + 1;
+        eval { Crypt::Age::Primitives->decrypt_payload($payload_key, $wide) };
+        $dec_err = $@;
+    }
+
+    ok($dec_err, 'decrypt_payload with a wide-character ciphertext dies');
+    like($dec_err,
+        qr/^ciphertext must be a byte string: it holds a code point above 0xFF, read it with :raw rather than decoding it\b/,
+        'the message names the parameter, the cause and the fix, not EINVAL');
+    unlike($dec_err, qr/Invalid argument/,
+        'decrypt_payload no longer passes perl\'s EINVAL through');
+    is_deeply(\@dec_warn, [],
+        'the check runs before the open, so perl emits no >0xFF warning');
+    unlike($dec_err, qr{Crypt/Age/Primitives\.pm},
+        'decrypt_payload croaks: Primitives.pm is not blamed as the origin');
+    my $dec_where = quotemeta(__FILE__).' line '.$dec_line;
+    like($dec_err, qr/$dec_where/,
+        'decrypt_payload reports the caller position in this test file');
+    ok(index($dec_err, 'not bytes') == -1,
+        'no part of the input appears in the error');
+}
+
+# Ticket #28 counter-proof: the check may reject only what perl cannot map. A
+# string stored upgraded whose code points all fit in a byte is bytes, and it
+# is what rules out utf8::is_utf8 as the test -- that would answer true here
+# and refuse a payload perl maps happily. It has to keep round tripping, and
+# the caller's own scalar has to come back untouched, since each method
+# downgrades the copy it holds and nothing else.
+{
+    my $payload_key = pack('H*', '00' x 32);
+
+    my $plaintext = "caf\x{e9} \x{ff}";
+    utf8::upgrade($plaintext);
+    ok(utf8::is_utf8($plaintext), 'the counter-proof plaintext really is stored upgraded');
+
+    my $ciphertext = Crypt::Age::Primitives->encrypt_payload($payload_key, $plaintext);
+    ok(utf8::is_utf8($plaintext),
+        'encrypt_payload downgraded its own copy, not the caller\'s scalar');
+
+    utf8::upgrade($ciphertext);
+    my $round = Crypt::Age::Primitives->decrypt_payload($payload_key, $ciphertext);
+    ok(utf8::is_utf8($ciphertext),
+        'decrypt_payload downgraded its own copy, not the caller\'s scalar');
+
+    is($round, "caf\xe9 \xff",
+        'an upgraded string within Latin-1 is bytes and still round trips');
+    ok(!utf8::is_utf8($round), 'decrypt_payload returns a byte string');
+}
+
 # Runs decrypt_payload_fh over a ciphertext held in memory and reports both
 # halves of its contract: what reached the output handle, and whether it died.
 # Reading that handle after a die is the point -- partial release is part of

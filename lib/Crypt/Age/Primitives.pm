@@ -292,6 +292,15 @@ then computes HMAC-SHA256 of the header. Returns 32 bytes.
 sub encrypt_payload {
     my ($class, $payload_key, $plaintext) = @_;
 
+    # Perl's own test for the in-memory open below, hoisted so the failure
+    # names its cause instead of arriving as EINVAL from the open. Why
+    # utf8::downgrade rather than utf8::is_utf8 or a /[^\x00-\xff]/ scan, and
+    # why mutating this copy is safe, is written out over the same check in
+    # Crypt::Age::encrypt.
+    utf8::downgrade($plaintext, 1)
+        or croak 'plaintext must be a byte string: it holds a code point '
+            .'above 0xFF, encode it before passing it in';
+
     open my $ifh, '<:raw', \$plaintext or croak "Cannot open input string: $!";
 
     my $output = '';
@@ -314,6 +323,11 @@ Encrypts the payload using ChaCha20-Poly1305 in chunked mode.
 The plaintext is split into 64 KiB chunks. Each chunk is encrypted with a unique
 nonce derived from a counter and a final-chunk flag. Returns the concatenated
 encrypted chunks.
+
+C<$plaintext> must be a B<byte string>. One holding a code point above C<0xFF>
+is rejected before anything else happens, with C<"plaintext must be a byte
+string: it holds a code point above 0xFF, encode it before passing it in">; see
+L<Crypt::Age/encrypt> for what this check does and does not catch.
 
 =cut
 
@@ -358,6 +372,13 @@ nonce derived from a counter and that final-chunk flag.
 sub decrypt_payload {
     my ($class, $payload_key, $ciphertext) = @_;
 
+    # Same test, same reasons as in encrypt_payload above; the advice differs
+    # because an age payload is binary, so a wide character in it means the
+    # caller decoded bytes that were never text.
+    utf8::downgrade($ciphertext, 1)
+        or croak 'ciphertext must be a byte string: it holds a code point '
+            .'above 0xFF, read it with :raw rather than decoding it';
+
     open my $ifh, '<:raw', \$ciphertext or croak "Cannot open input string: $!";
 
     my $output = '';
@@ -387,6 +408,11 @@ partial plaintext is written to an internal buffer that is discarded when the
 call dies, so a caller only ever sees plaintext from a payload that was
 decrypted to its final chunk. Callers that need the streaming behaviour, and
 can handle the partial release that comes with it, want the filehandle form.
+
+C<$ciphertext> must be a B<byte string>. One holding a code point above C<0xFF>
+is rejected before anything else happens, with C<"ciphertext must be a byte
+string: it holds a code point above 0xFF, read it with :raw rather than decoding
+it">; see L<Crypt::Age/decrypt>.
 
 =cut
 

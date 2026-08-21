@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use Test::More;
+use File::Temp qw(tempfile);
 use Crypt::Age::Header;
 use Crypt::Age::Keys;
 use Crypt::Age::Primitives;
@@ -617,6 +618,169 @@ use Crypt::Age::Stanza::X25519;
         'an all-undef identity list warns not at all');
     like($err_none, qr/^No matching identity found/,
         'and still fails with the unchanged no-match error');
+}
+
+# Ticket #30, the third instance of the class #26 fixed in Crypt::Age and #28
+# in Crypt::Age::Primitives: parse maps the scalar behind its ScalarRef into an
+# in-memory handle, and perl refuses to map one holding a code point above
+# 0xFF -- it warned "Strings with code points over 0xFF may not be mapped into
+# in-memory file handles", the open then failed, and the croak read "Invalid
+# age input: cannot read", which is true but names no cause and suggests no
+# fix. A scan before the open replaces that with a message naming both; the
+# open is never reached on this path, so the warning is gone too -- asserted,
+# not suppressed.
+#
+# The scan is deliberate where the other three downgrade: the parameter is the
+# caller's own scalar behind a ref, not a copy off @_, so this check reads it
+# and never writes to it.
+{
+    my $wide = "age-encryption.org/v1\n\x{100} not bytes";
+    my $offset = 0;
+
+    my ($err, $line, @warn);
+    {
+        local $SIG{__WARN__} = sub { push @warn, $_[0] };
+        local $@;
+        $line = __LINE__ + 1;
+        eval { Crypt::Age::Header->parse(\$wide, \$offset) };
+        $err = $@;
+    }
+
+    ok($err, 'parse with a wide-character data ref dies');
+    like($err,
+        qr/^data must be a byte string: it holds a code point above 0xFF, read it with :raw rather than decoding it\b/,
+        'the message names the parameter, the cause and the fix');
+    unlike($err, qr/Invalid age input: cannot read/,
+        'parse no longer reports only that it could not read');
+    is_deeply(\@warn, [],
+        'the check runs before the open, so perl emits no >0xFF warning');
+    unlike($err, qr{Crypt/Age/Header\.pm},
+        'parse croaks: Header.pm is not blamed as the origin');
+    my $where = quotemeta(__FILE__).' line '.$line;
+    like($err, qr/$where/,
+        'parse reports the caller position in this test file');
+    ok(index($err, 'not bytes') == -1,
+        'no part of the input appears in the error');
+
+    # The one thing the non-mutating scan buys over a utf8::downgrade through
+    # the ref: a rejected $data comes back exactly as the caller had it,
+    # internal representation included.
+    ok(utf8::is_utf8($wide),
+        'the rejected data ref is left flagged -- the check never wrote to it');
+    is($wide, "age-encryption.org/v1\n\x{100} not bytes",
+        'and its value is untouched');
+    is($offset, 0, 'and the offset ref was never advanced');
+}
+
+# Ticket #31, the argument shapes parse never checked. Its first parameter is
+# documented as a ScalarRef and used to go straight to open, which is a
+# filesystem open for everything that is not one: a plain string named a file,
+# undef warned about the caller's mistake from inside Header.pm, and any other
+# ref croaked "Invalid age input: cannot read", naming neither cause nor fix.
+# All three now fail one type check before the open. This replaces #30's block
+# over the same three shapes -- that one recorded the behaviour of the day so
+# the wide-character scan could be shown not to disturb it, which was a
+# characterization, never a claim that it was right.
+my $ref_msg = 'data must be a ScalarRef: this method opens it, and a plain '
+    .'string is a filename, pass \$data rather than $data';
+
+{
+    for my $case (['a plain string', "age-encryption.org/v1\nnot-a-ref"],
+                  ['undef', undef],
+                  ['an ARRAY ref', [1, 2]]) {
+        my ($what, $arg) = @$case;
+        my $offset = 0;
+
+        my ($err, $line, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            $line = __LINE__ + 1;
+            eval { Crypt::Age::Header->parse($arg, \$offset) };
+            $err = $@;
+        }
+
+        like($err, qr/^\Q$ref_msg\E\b/,
+            "$what is rejected by type, naming the parameter and the fix");
+        unlike($err, qr/Invalid age input: cannot read/,
+            "$what no longer arrives as a failed read");
+        unlike($err, qr/not-a-ref/,
+            "$what leaves no caller input in the message");
+        is_deeply(\@warn, [],
+            "$what reaches no open, so nothing warns out of Header.pm");
+        unlike($err, qr{Crypt/Age/Header\.pm},
+            "$what croaks: Header.pm is not blamed as the origin");
+        my $where = quotemeta(__FILE__).' line '.$line;
+        like($err, qr/$where/,
+            "$what reports the caller position in this test file");
+        is($offset, 0, "$what left the offset ref untouched");
+    }
+}
+
+# Ticket #31, the half that is not cosmetics. Before the type check a plain
+# string was a filename, so parse opened and read that file: given a path to a
+# readable age header it returned a Crypt::Age::Header built from the file's
+# bytes and advanced the caller's $offset past them. The fixture below is a
+# real, readable file holding a header this parser accepts, which is what makes
+# the assertion falsifiable -- without the check parse succeeds here.
+{
+    my ($public) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+    my $header_bytes = Crypt::Age::Header->create($file_key, [$public])->to_string;
+
+    my ($fh, $path) = tempfile(UNLINK => 1);
+    binmode($fh, ':raw');
+    print $fh $header_bytes;
+    close $fh;
+    ok(-r $path, 'fixture: the file exists and is readable');
+
+    my $offset = 0;
+    my $parsed = eval { Crypt::Age::Header->parse($path, \$offset) };
+    my $err = $@;
+
+    is($parsed, undef,
+        'a plain string naming a readable file does not open and parse it');
+    like($err, qr/^\Q$ref_msg\E\b/, 'it is a type error instead');
+    ok(index($err, $path) == -1,
+        'and the path the caller passed is not echoed into the error');
+    is($offset, 0, 'the offset ref was not advanced past that file');
+
+    # Counter-proof that the fixture really is parseable, so the assertion
+    # above measures the type check and not an unreadable file.
+    my $data = $header_bytes;
+    my $data_offset = 0;
+    my $ok = Crypt::Age::Header->parse(\$data, \$data_offset);
+    is(scalar @{$ok->stanzas}, 1,
+        'the same bytes behind a ScalarRef still parse');
+    is($data_offset, length($header_bytes),
+        'and advance the offset to the end of the header');
+}
+
+# Ticket #30 counter-proof: the check may reject only what perl cannot map. A
+# header stored upgraded whose code points all fit in a byte is bytes, and it
+# is what rules out utf8::is_utf8 as the test -- that would answer true here
+# and refuse a header perl maps happily.
+#
+# It also records the limit of the non-mutating scan, so that nobody documents
+# more than it does: on this path perl's own open downgrades the referenced
+# scalar in place, so the caller's $str comes back unflagged. The scan does not
+# prevent that and never could -- it only keeps the rejection path above clean.
+{
+    my ($public) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+    my $str = Crypt::Age::Header->create($file_key, [$public])->to_string;
+
+    utf8::upgrade($str);
+    ok(utf8::is_utf8($str), 'fixture: the header string really is stored upgraded');
+
+    my $offset = 0;
+    my $parsed = eval { Crypt::Age::Header->parse(\$str, \$offset) };
+    is($@, '', 'an upgraded header within Latin-1 is bytes and still parses');
+    is(scalar @{$parsed->stanzas}, 1, 'and yields its stanza');
+    is($offset, length($str), 'and the offset still lands at the end of the header');
+
+    ok(!utf8::is_utf8($str),
+        "perl's in-memory open downgraded the caller's scalar, not our check");
 }
 
 done_testing;

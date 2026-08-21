@@ -251,8 +251,10 @@ Parameters:
 Returns the decrypted plaintext.
 
 The method tries each identity against each recipient stanza in the header until
-one successfully unwraps the file key. Dies if no matching identity is found or
-if the MAC verification fails.
+one successfully unwraps the file key. Dies on the same conditions as
+L</decrypt_file>, except file I/O errors -- this method never opens a file. It
+also rejects a C<ciphertext> holding a code point above C<0xFF> before
+attempting any of that; see below for the exact message.
 
 C<ciphertext> must be a B<byte string>, and so is the plaintext this method
 returns. age ciphertext is binary, so read it with C<:raw> and never through
