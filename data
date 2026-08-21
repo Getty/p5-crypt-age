@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-08-21T01:41:56Z
+claimed_by: crypt-age-worker
+class: standard
+completed: 2026-08-21T03:25:44Z
+created: 2026-08-21T01:29:58Z
+id: 31
+priority: low
+started: 2026-08-21T01:32:00Z
+status: done
+tags:
+- api
+- security
+title: Header::parse does not validate that its first argument is a ScalarRef
+updated: 2026-08-21T03:25:44Z
+---
+
+Found while doing #30, deliberately not fixed there -- one ticket, one change.
+
+Crypt::Age::Header->parse($data_ref, $offset_ref) documents $data_ref as a ScalarRef and passes it straight to open (Header.pm). Nothing checks it, and the three shapes that are not a ScalarRef all behave badly:
+
+  * a plain string: open my $fh, "<:raw", "some/path" opens the FILE of that name. A caller who forgets the backslash and writes parse($ciphertext, \$offset) gets a filesystem open driven by attacker-influenced content instead of a type error. Where the string does not name a readable file it fails as "Invalid age input: cannot read", so the misuse is silent whenever it does.
+  * undef: perl warns "Use of uninitialized value $data_ref in open" from inside Header.pm, blaming the module for the caller mistake, then croaks "Invalid age input: cannot read".
+  * any other ref (ARRAY, HASH): croaks "Invalid age input: cannot read", which names neither the cause nor the fix -- the same defect class as #26/#28/#30, one argument along.
+
+#30 added a wide-character scan in front of that open and guarded it on ref eq "SCALAR" precisely so these three keep reaching the open exactly as they did: dereferencing a non-ref would croak with perls strict-refs message, which quotes the callers own input into the error. t/03-header.t has a block asserting that unchanged behaviour ("the argument shapes the scan must not disturb"); a fix here replaces those three assertions, so read them first -- they are a characterization of todays behaviour, not a claim that it is right.
+
+Fix shape: croak naming the parameter and the fix when ref $data_ref ne "SCALAR", before the open, no caller input echoed, matching the message style of the #26/#28/#30 pairs. The SCALAR guard on the wide-character scan then becomes redundant and should go.
+2026-08-21 01:38 Fixed: parse croaks 'data must be a ScalarRef: a plain string is opened as a file, pass \$data rather than $data' when ref ne SCALAR, before the wide-character scan and the open. The SCALAR guard on that scan is gone (the type is settled above) and its comment paragraph rewritten. Red-before-green verified: the plain-string case returned a Crypt::Age::Header parsed out of a real file and advanced the caller's offset to 168 before the fix. t/03-header.t's #30 block over the same three shapes rewritten onto the new behaviour, plus a File::Temp fixture asserting no file is opened; =method parse POD and a Changes entry naming the file-opening case. prove -lr t/ 636 pass; t/07-testkit.t 144 (68 vectors run, 75 skipped); t/04-interop.t 120 against age 1.2.1 and rage 0.12.1. Not committed.
+Message reworded after review: the clause after the colon now carries the requirement and its reason instead of describing the input, since the check fires for every non-SCALAR shape and never examined whether a plain string arrived. Now: 'data must be a ScalarRef: this method opens it, and a plain string is a filename, pass \$data rather than $data'. Still interpolates nothing. POD quote, the single $ref_msg literal the t/03-header.t assertions match on, and the Changes quote pulled along. prove -lr t/ 636 pass.
