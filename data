@@ -1,0 +1,34 @@
+---
+class: standard
+completed: 2026-08-21T04:37:31Z
+created: 2026-08-21T03:55:56Z
+id: 36
+priority: low
+started: 2026-08-21T04:07:19Z
+status: done
+tags:
+- api
+title: Header::create accepts an empty ArrayRef and returns a header with no stanzas
+updated: 2026-08-21T04:37:31Z
+---
+
+Found while doing #34, not fixed there -- one ticket, one change.
+
+Crypt::Age::Header->create($file_key, []) returns a header with zero recipient stanzas. That is not a valid age file: nothing can ever decrypt it, and the file key is unrecoverable. It is silently accepted and only fails later, if at all.
+
+Crypt::Age::_encrypt_fh already guards this ("at least one recipient required"), so the string, file and filehandle API is unaffected. A caller using Header->create directly -- which the POD documents as public, and which #34 just added an ArrayRef type check to -- is not guarded.
+
+Fix shape: croak when the arrayref is empty, immediately after the ref check #34 added, in the message form settled across #31-#34. Consider whether the wording should match _encrypt_fh existing "at least one recipient required" or the newer form; see #37, which is about exactly that divergence.
+
+Regression test in t/03-header.t alongside the #34 block.
+2026-08-21 04:36 Fixed. Header::create now croaks "recipients must not be empty: this method wraps the file key once per entry, so a header with no stanzas can never be unwrapped, pass at least one recipient" after the #34 shape check and before the file key is touched. Spec basis read, not guessed: the header grammar is "header = v1-line 1*stanza end" -- one or more -- so a zero-stanza header is not a valid header. Measured on a file built from one: rage 0.12.1 refuses it as "Unknown age format", age 1.2.1 parses it and reports "no identity matched any of the recipients".
+
+Wording decision (the open question in this ticket): the new form, and _encrypt_fh/_decrypt_fh pulled onto it in the same change. Leaving them on "at least one recipient/identity required" would have recreated, for the empty-list case, exactly the divergence #37 closed for the shape case. Each guard keeps its own layer's reason clause, as #37 established.
+
+unwrap_file_key measured, not assumed: NOT the same defect. An empty identities list already croaks "No matching identity found" -- it fails loudly, returns nothing and loses nothing -- so no guard was added there. Its behaviour is pinned by a new assertion so the read side cannot grow the defect the write side just lost. The _decrypt_fh identities message still moved, for wording consistency only; that is stated in the code comment and in Changes.
+
+House rule 8 on t/02-encrypt-decrypt.t:264, like($@, qr/at least one recipient/): it asserts that the emptiness check fires, matched loosely by text. The change keeps that claim -- and the loose regex still matches, incidentally, because the new fix clause ends "pass at least one recipient". Left as it is; the new block pins the full literal up to croak's " at FILE line N." tail.
+
+Red-before-green verified: 3 failures in t/03-header.t (the message, the caller position, and the pin that no header object comes back) and 6 in t/02-encrypt-decrypt.t before the code change; all green after. POD on create, encrypt, decrypt and encrypt_filehandle. Changes entry under {{$NEXT}}; the #37 bullet's clause claiming these two emptiness checks were unchanged was corrected, since within one unreleased version it had become false.
+
+Runs: prove -lr t/ 805 tests PASS. t/07-testkit.t 144 PASS (68 vectors run, 75 skipped). t/04-interop.t RAN -- 120 tests, 60 [age] 1.2.1 + 60 [rage] 0.12.1, PASS. dzil build clean, woven POD checks clean. Not committed. Two findings reported to the caller, no ticket filed per instruction.
