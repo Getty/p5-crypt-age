@@ -55,25 +55,38 @@ use Crypt::Age::Keys;
 }
 
 # Ticket #20: decode_public_key's and decode_secret_key's HRP-mismatch
-# croaks (Keys.pm:101, Keys.pm:138) are documented in their own POD as the
-# behaviour a caller can rely on ("Dies if the HRP is not ..."), but nothing
-# in t/ asserted either message -- confirmed by grep before this was written.
-# The natural way to reach them is a caller passing the wrong kind of key --
-# an identity where a public key belongs, or the reverse -- so this uses real
-# generated keys rather than a synthetic HRP. bech32_decode does not
-# lowercase the HRP it returns (only the checksum check does that
-# internally), so the secret key's HRP surfaces in the message exactly as
-# the key carries it: uppercase.
+# croaks are documented in their own POD as the behaviour a caller can rely on
+# ("Dies if the HRP is not ..."), but nothing in t/ asserted either message --
+# confirmed by grep before this was written. The natural way to reach them is a
+# caller passing the wrong kind of key -- an identity where a public key
+# belongs, or the reverse -- so this uses real generated keys rather than a
+# synthetic HRP.
+#
+# Ticket #35 replaced the claim this block used to make. It asserted the old
+# wording, "expected 'age', got 'AGE-SECRET-KEY-'", which quoted back the HRP
+# that arrived; that HRP is caller material and is no longer named. On this
+# path it is only the other type's constant prefix, so nothing leaked here --
+# which is exactly why the swap keeps its own assertions and the disclosure is
+# measured in the #35 block below, on a string whose HRP carries real key
+# characters.
 {
     my ($public, $secret) = Crypt::Age::Keys->generate_keypair;
 
     eval { Crypt::Age::Keys->decode_public_key($secret) };
-    like($@, qr/^Invalid public key HRP: expected 'age', got 'AGE-SECRET-KEY-'/,
+    like($@, qr/^Invalid public key HRP: expected the literal age prefix, /,
         'decode_public_key on a secret key string reports the documented HRP mismatch');
+    unlike($@, qr/AGE-SECRET-KEY-/i,
+        'and does not name the HRP it decoded, not even as the other type prefix');
 
     eval { Crypt::Age::Keys->decode_secret_key($public) };
-    like($@, qr/^Invalid secret key HRP: expected 'age-secret-key-', got 'age'/,
+    like($@, qr/^Invalid secret key HRP: expected the literal age-secret-key- prefix, /,
         'decode_secret_key on a public key string reports the documented HRP mismatch');
+    # The mirror assertion cannot be written the same way round: the HRP that
+    # arrived here is "age", which is a substring of the expected constant this
+    # message names on purpose. What is asserted instead is that the clause
+    # reporting what arrived is gone altogether.
+    unlike($@, qr/got /,
+        'and carries the requirement and the fix rather than what arrived');
 }
 
 # Test Bech32 with known test vectors
@@ -199,6 +212,107 @@ use Crypt::Age::Keys;
         ok(index($err, $marker) < 0,
             'the offending character itself does not appear in the message');
     }
+}
+
+# Ticket #35: both HRP-mismatch croaks used to interpolate the HRP they
+# decoded. bech32_decode returns everything before the last "1" of the string
+# it was handed, so that value is a prefix of the caller's own material,
+# written into an exception raised inside this module.
+#
+# Reachability, measured before this block was written rather than assumed, on
+# a freshly generated secret key: truncated inside the HRP it dies at "Invalid
+# bech32: no separator", truncated at the separator at "Invalid bech32: empty
+# data", truncated anywhere in the data part or given trailing junk at "Invalid
+# bech32 checksum". None of those quote anything. A string therefore only
+# reaches the HRP croak when its Bech32 checksum verifies over the wrong HRP --
+# a constructed input rather than a mistyped one, which is why this ticket is
+# low and not the disclosure #34 was. Constructed is not unreachable: a string
+# whose HRP is the opening characters of a real identity is precisely how those
+# characters would be read back out of an exception.
+#
+# That is the input built below. 32 bytes are encoded under an HRP that is the
+# first 31 characters of a freshly generated key, so the checksum verifies and
+# the decoded HRP comes back as those 31 characters. The secret half is encoded
+# through the lowercased HRP because bech32_verify_checksum checks against
+# lc($hrp), and uppercased afterwards so the string is not mixed case -- which
+# bech32_decode refuses before it ever looks at the HRP -- and carries the
+# key's own casing.
+#
+# 31 characters and not the whole key, deliberately: a leak assertion has to be
+# able to fail in the red state, and what the red state put in the message was
+# the decoded HRP, so it is the fixture that has to bound the length. The
+# 32-character limit that shaped the same assertions in #34 is perl's own, on
+# the strings perl quotes into its dereference errors; these croaks are this
+# module's and truncate nothing.
+#
+# Every assertion below is index() inside ok(), or is() on a count. Never
+# like()/unlike()/is_deeply on $err: those print the value they were given when
+# they fail, so a red run would write the same key characters into the test
+# output that the bug writes into a caller's log.
+{
+    my ($public, $secret) = Crypt::Age::Keys->generate_keypair;
+
+    my $secret_hrp = substr($secret, 0, 31);
+    my $crafted = uc(Crypt::Age::Keys->bech32_encode(lc($secret_hrp), "\x01" x 32));
+
+    # The part of that HRP which is key material rather than type prefix:
+    # "AGE-SECRET-KEY-1" is 16 public characters, the 15 after it are not.
+    my $secret_chars = substr($secret, 16, 15);
+
+    ok(index($crafted, $secret_hrp) == 0,
+        'fixture: the crafted string opens with 31 characters of a real secret key');
+    ok(rindex($crafted, '1') == length($secret_hrp),
+        'fixture: the last "1" is the one bech32_encode appended, so those 31 characters are the HRP that decodes');
+
+    my ($err, @warn);
+    {
+        local $SIG{__WARN__} = sub { push @warn, $_[0] };
+        local $@;
+        eval { Crypt::Age::Keys->decode_secret_key($crafted) };
+        $err = $@;
+    }
+
+    ok(index($err, 'Invalid secret key HRP: expected the literal age-secret-key- prefix') == 0,
+        'a checksum that verifies over the wrong HRP is refused, naming the expected HRP');
+    ok(index($err, $secret_hrp) == -1,
+        'and no part of the HRP it decoded reaches the message');
+    ok(index($err, $secret_chars) == -1,
+        'not even the 15 characters of key material that HRP carried');
+    is(scalar @warn, 0, 'and nothing warns out of Keys.pm');
+    ok(index($err, 'Crypt/Age/Keys.pm') == -1,
+        'it croaks: Keys.pm is not blamed as the origin');
+
+    # The same shape on the public half. A public key is not a secret, so this
+    # is not a disclosure -- it is the same defect, and the ticket asks for both
+    # methods to read the same way, so it is asserted the same way.
+    my $public_hrp = substr($public, 0, 31);
+    my $crafted_public = Crypt::Age::Keys->bech32_encode($public_hrp, "\x02" x 32);
+
+    ok(rindex($crafted_public, '1') == length($public_hrp),
+        'fixture: the same holds for the public half, whose HRP carries a "1" of its own');
+
+    my ($err_public, @warn_public);
+    {
+        local $SIG{__WARN__} = sub { push @warn_public, $_[0] };
+        local $@;
+        eval { Crypt::Age::Keys->decode_public_key($crafted_public) };
+        $err_public = $@;
+    }
+
+    ok(index($err_public, 'Invalid public key HRP: expected the literal age prefix') == 0,
+        'the public half is refused the same way, naming the expected HRP');
+    ok(index($err_public, $public_hrp) == -1,
+        'and no part of the HRP it decoded reaches the message');
+    ok(index($err_public, substr($public, 4, 27)) == -1,
+        'not even the 27 characters of key material that HRP carried');
+    is(scalar @warn_public, 0, 'and nothing warns out of Keys.pm');
+
+    # Counter-proof that the two cases above measure the HRP check and not a
+    # string this module could not have decoded in the first place.
+    is(length(Crypt::Age::Keys->decode_secret_key($secret)), 32,
+        'the untouched secret key still decodes to 32 bytes');
+    is(length(Crypt::Age::Keys->decode_public_key($public)), 32,
+        'the untouched public key still decodes to 32 bytes');
 }
 
 done_testing;

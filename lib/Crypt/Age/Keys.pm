@@ -98,7 +98,17 @@ Returns a lowercase string starting with C<age1>.
 sub decode_public_key {
     my ($class, $encoded) = @_;
     my ($hrp, $bytes) = $class->bech32_decode($encoded);
-    croak "Invalid public key HRP: expected '$HRP_PUBLIC', got '$hrp'"
+    # $hrp is caller material, not a value from this module: bech32_decode
+    # returns everything before the last "1" of the string it was handed. For
+    # a real key of the other kind that is only the other type prefix, but a
+    # string whose HRP carries key characters reaches here too, so nothing of
+    # it is quoted. The check is against a single constant, so naming the
+    # expected value says everything the caller needs. Written out in full at
+    # decode_secret_key, where the same value is a secret; both read the same
+    # way on purpose.
+    croak 'Invalid public key HRP: expected the literal '.$HRP_PUBLIC
+        .' prefix, pass an age recipient rather than an identity or some '
+        .'other Bech32 string'
         unless lc($hrp) eq $HRP_PUBLIC;
     croak "Invalid public key length" unless length($bytes) == 32;
     return $bytes;
@@ -113,6 +123,16 @@ Decodes a Bech32-encoded age public key to raw bytes.
 Dies if the HRP is not C<age>, if the decoded data is not 32 bytes, or if the
 string mixes upper- and lowercase; see L</bech32_decode>. The HRP is compared
 case-insensitively, so an all-uppercase C<AGE1...> key is accepted as well.
+
+The HRP mismatch is reported as C<"Invalid public key HRP: expected the
+literal age prefix, pass an age recipient rather than an identity or some
+other Bech32 string">. It names the expected HRP, which is a constant of the
+format, and B<not> the one that arrived: the received HRP is everything before
+the last C<1> of the string that was passed in, so it is a prefix of the
+caller's own material. Here that material is a public key and no secret is at
+stake, but the message reads the same as L</decode_secret_key>'s, where it is.
+Callers matching on the old C<"expected 'age', got '...'"> wording see the new
+message instead.
 
 =cut
 
@@ -135,7 +155,27 @@ Returns an uppercase string starting with C<AGE-SECRET-KEY-1>.
 sub decode_secret_key {
     my ($class, $encoded) = @_;
     my ($hrp, $bytes) = $class->bech32_decode($encoded);
-    croak "Invalid secret key HRP: expected '$HRP_SECRET', got '$hrp'"
+    # The same croak as in decode_public_key, and the half where the quoted
+    # value could be a secret. $hrp is everything before the last "1" of the
+    # caller's string, so it is a prefix of what arrived.
+    #
+    # Reaching this croak takes a Bech32 string whose checksum verifies over
+    # the wrong HRP, which bounds it but does not make it safe. Measured on
+    # this module: a real key truncated anywhere dies earlier at "Invalid
+    # bech32: no separator", "Invalid bech32: empty data" or "Invalid bech32
+    # checksum", and one with trailing junk at "Invalid bech32 checksum" --
+    # none of those quote anything. So the string that gets here is
+    # constructed rather than mistyped; and a string constructed with the
+    # opening characters of a real identity as its HRP is precisely how those
+    # characters would be read back out of an exception, from inside this
+    # module, into a log the caller can no longer redact.
+    #
+    # As at the version-line croak in Crypt::Age::Header, the clause after the
+    # colon carries the requirement and the fix rather than a description of
+    # what arrived. The expected HRP is a constant of the format and is named.
+    croak 'Invalid secret key HRP: expected the literal '.$HRP_SECRET
+        .' prefix, pass an age identity rather than a recipient or some '
+        .'other Bech32 string'
         unless lc($hrp) eq $HRP_SECRET;
     croak "Invalid secret key length" unless length($bytes) == 32;
     return $bytes;
@@ -151,6 +191,24 @@ Dies if the HRP is not C<age-secret-key->, if the decoded data is not 32 bytes,
 or if the string mixes upper- and lowercase; see L</bech32_decode>. The HRP is
 compared case-insensitively, so an all-lowercase C<age-secret-key-1...> key is
 accepted as well as the uppercase form L</encode_secret_key> emits.
+
+The HRP mismatch is reported as C<"Invalid secret key HRP: expected the literal
+age-secret-key- prefix, pass an age identity rather than a recipient or some
+other Bech32 string">, and quotes no part of what arrived. The received HRP is
+everything before the last C<1> of the caller's string, so a string whose HRP
+is the opening characters of a real identity would have had those characters
+written into an exception raised inside this module, where the caller can no
+longer redact them.
+
+Reaching that croak needs a Bech32 string whose checksum verifies over the
+wrong HRP, so it is a constructed input rather than a mistyped one: a key
+truncated anywhere dies first with C<"Invalid bech32: no separator">,
+C<"Invalid bech32: empty data"> or C<"Invalid bech32 checksum">, and one with
+trailing junk with C<"Invalid bech32 checksum">, none of which quote anything
+either. The everyday way to reach it -- passing a public key here, or an
+identity to L</decode_public_key> -- puts only the other type's prefix in that
+position. Callers matching on the old C<"expected 'age-secret-key-', got
+'...'"> wording see the new message instead.
 
 =cut
 

@@ -506,4 +506,118 @@ use Crypt::Age::Header;
     }
 }
 
+# Ticket #37: Crypt::Age and Crypt::Age::Header used to answer the same caller
+# mistake in two different wordings -- "recipients must be an array ref" here
+# against "recipients must be an ArrayRef: ..." one layer down -- and a caller
+# who hit one and searched for the other found nothing. The guards here are the
+# ones that always fire: _encrypt_fh and _decrypt_fh check the shape before
+# handing the list to create and unwrap_file_key, so Header's messages are
+# unreachable through the public API and these two are what callers actually
+# see. Nothing about the checks moved; only their text.
+#
+# undef is deliberately not among the shapes below. On every public path the
+# "recipients required" / "identities required" defined-or guard catches it one
+# statement earlier, so it never reaches these croaks -- pre-existing behaviour
+# this ticket does not touch, and asserting the ArrayRef message for it would
+# assert something false.
+#
+# The markers are 23 and 26 characters. Perl truncates the string it quotes in
+# "Can't use string (...) as an ARRAY ref" at 32, so a longer marker could not
+# appear even with both guards gone, and a "nothing leaked" assertion built on
+# it would pass without being able to fail.
+{
+    my ($public, $secret) = Crypt::Age->generate_keypair;
+    my $ciphertext = Crypt::Age->encrypt(
+        plaintext  => 'ticket #37 fixture',
+        recipients => [$public],
+    );
+
+    my $recipients_msg = 'recipients must be an ArrayRef: this method encrypts '
+        .'to every entry, pass [$recipient] rather than $recipient';
+    my $identities_msg = 'identities must be an ArrayRef: this method decrypts '
+        .'with whichever entry matches, pass [$identity] rather than $identity';
+
+    my $rcpt_marker = 'age1LEAKMARKERRECIPIENT';
+    my $idnt_marker = 'AGE-SECRET-KEY-1LEAKMARKER';
+
+    # croak reports the frame that called encrypt/decrypt, which is the
+    # closure below and not the eval that runs it. Each closure therefore
+    # records its own line, on the same physical line as the call, so the
+    # position assertion stays exact when this block is edited.
+    my $call_line;
+    my @cases = (
+        {   side   => 'encrypt',
+            msg    => $recipients_msg,
+            marker => $rcpt_marker,
+            call   => sub {
+                $call_line = __LINE__; Crypt::Age->encrypt(plaintext => 'x', recipients => $_[0]);
+            },
+            shapes => [ ['a bare recipient string', $rcpt_marker],
+                        ['a HASH ref',              { $rcpt_marker => 1 }],
+                        ['a SCALAR ref',            \$rcpt_marker] ],
+        },
+        {   side   => 'decrypt',
+            msg    => $identities_msg,
+            marker => $idnt_marker,
+            call   => sub {
+                $call_line = __LINE__; Crypt::Age->decrypt(ciphertext => $ciphertext, identities => $_[0]);
+            },
+            shapes => [ ['a bare identity string', $idnt_marker],
+                        ['a HASH ref',             { $idnt_marker => 1 }],
+                        ['a SCALAR ref',           \$idnt_marker] ],
+        },
+    );
+
+    for my $case (@cases) {
+        my ($side, $msg, $marker) = @{$case}{qw( side msg marker )};
+
+        for my $shape (@{$case->{shapes}}) {
+            my ($what, $arg) = @$shape;
+
+            my ($err, @warn);
+            {
+                local $SIG{__WARN__} = sub { push @warn, $_[0] };
+                local $@;
+                undef $call_line;
+                eval { $case->{call}->($arg) };
+                $err = $@;
+            }
+
+            # The whole message up to croak's " at FILE line N." tail, not a
+            # prefix: a wording that drifts back towards Header's, or picks up
+            # an interpolated suffix, stops matching here.
+            like($err, qr/^\Q$msg\E(?: at |\z)/,
+                "$side: $what is rejected with exactly the documented message");
+            unlike($err, qr/strict refs|ARRAY reference/,
+                "$side: $what no longer arrives as perl's own dereference error");
+            ok(index($err, $marker) == -1,
+                "$side: $what leaves no caller input in the message");
+            is_deeply(\@warn, [],
+                "$side: $what reaches no dereference, so nothing warns");
+            unlike($err, qr{Crypt/Age\.pm},
+                "$side: $what croaks -- Crypt/Age.pm is not blamed as the origin");
+            my $where = quotemeta(__FILE__).' line '.$call_line;
+            like($err, qr/$where/,
+                "$side: $what reports the caller position in this test file");
+        }
+    }
+
+    # And the POD claims what the code emits, the same pin ticket #27 put on
+    # the recipient rejection above. Read the module that was actually loaded,
+    # not a path guessed from cwd.
+    my $flat = do {
+        open my $pod_fh, '<:raw', $INC{'Crypt/Age.pm'}
+            or die "cannot read the loaded Crypt::Age: $!";
+        local $/;
+        my $source = <$pod_fh>;
+        $source =~ s/\s+/ /g;    # the POD wraps; the quoted message does not
+        $source;
+    };
+
+    for my $quoted ($recipients_msg, $identities_msg) {
+        ok(index($flat, $quoted) >= 0,
+            'Crypt::Age POD quotes "'.$quoted.'"');
+    }
+}
+
 done_testing;

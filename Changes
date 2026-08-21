@@ -1,6 +1,53 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Crypt::Age::Keys->decode_secret_key and ->decode_public_key no longer
+    quote the human-readable part they decoded when it is not the expected
+    one. Both croaked "Invalid secret key HRP: expected 'age-secret-key-',
+    got '...'" and its public-key equivalent, where the value after "got" is
+    whatever bech32_decode returned as the HRP -- everything before the last
+    "1" of the string the caller passed, so a prefix of the caller's own
+    material, written into an exception raised inside this module and from
+    there into any log that catches it. They now report "Invalid secret key
+    HRP: expected the literal age-secret-key- prefix, pass an age identity
+    rather than a recipient or some other Bech32 string" and "Invalid public
+    key HRP: expected the literal age prefix, pass an age recipient rather
+    than an identity or some other Bech32 string": the expected HRP is a
+    constant of the format and is named, the one that arrived is not. The
+    reach is narrow and is worth stating plainly rather than dressing up.
+    Getting to either croak takes a Bech32 string whose checksum verifies
+    over the wrong HRP. Measured on real keys, every mistyping dies earlier
+    and quotes nothing -- a truncation as "Invalid bech32: no separator",
+    "Invalid bech32: empty data" or "Invalid bech32 checksum" depending on
+    where it cuts, trailing junk as "Invalid bech32 checksum" -- and the
+    everyday way to arrive, passing a public key where an identity belongs or
+    the reverse, puts only the other type's constant prefix in that position,
+    which is not key material. What made it a disclosure is a string
+    constructed with the opening characters of a real key as its HRP, which
+    is a deliberate input and not an accident. Callers matching on the old
+    "expected '...', got '...'" wording of either message see the new one
+    instead; both methods accept and reject exactly the same strings as
+    before. The POD of both states the new message and this reach.
+  - Crypt::Age's own recipients and identities checks now report the same
+    message shape as their counterparts in Crypt::Age::Header, so one caller
+    mistake reads one way whichever layer catches it. "recipients must be an
+    array ref" becomes "recipients must be an ArrayRef: this method encrypts
+    to every entry, pass [$recipient] rather than $recipient", and "identities
+    must be an array ref" becomes "identities must be an ArrayRef: this method
+    decrypts with whichever entry matches, pass [$identity] rather than
+    $identity". These are the messages callers actually get: encrypt,
+    encrypt_file, encrypt_filehandle, decrypt, decrypt_file and
+    decrypt_filehandle all check the shape before handing the list to
+    Header->create or ->unwrap_file_key, so Header's wording is unreachable
+    through the public API, and a caller who hit one form and searched the
+    documentation for the other found nothing. The clause after the colon
+    states what this layer does with the list rather than what Header does
+    with it, and as before nothing about the argument is interpolated -- a
+    bare string in the identities parameter is a secret key. Only the text
+    moves: both checks accept and reject exactly what they accepted and
+    rejected before, and the separate "at least one recipient required" and
+    "at least one identity required" emptiness checks are unchanged. The POD
+    of encrypt and decrypt now quotes both messages.
   - Crypt::Age::Header->unwrap_file_key and ->create now require their list
     argument to really be an ArrayRef, and croak "identities must be an
     ArrayRef: this method tries each entry in turn, pass [$identity] rather

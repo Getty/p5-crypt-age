@@ -180,6 +180,13 @@ Returns the encrypted data in age format, which includes a text header followed
 by the encrypted payload. The file key is wrapped separately for each recipient,
 allowing any of them to decrypt the data.
 
+C<recipients> must really be an ArrayRef; a single recipient still goes in a
+list of one. Every other shape is refused before the file key is generated,
+with C<"recipients must be an ArrayRef: this method encrypts to every entry,
+pass [$recipient] rather than $recipient">. As elsewhere in this distribution
+the clause after the colon carries the requirement and its reason rather than a
+description of what arrived, and quotes no part of the argument.
+
 The returned data can be written to a file or transmitted directly.
 
 C<plaintext> and the returned ciphertext are both held in memory in full. For
@@ -250,6 +257,13 @@ Parameters:
 
 Returns the decrypted plaintext.
 
+C<identities> must really be an ArrayRef; a single identity still goes in a
+list of one -- the likeliest way to get this wrong, since one identity does not
+look like a list. Every other shape is refused before the header is parsed,
+with C<"identities must be an ArrayRef: this method decrypts with whichever
+entry matches, pass [$identity] rather than $identity">, which quotes no byte
+of the argument: a bare string in this parameter is a secret key.
+
 The method tries each identity against each recipient stanza in the header until
 one successfully unwraps the file key. Dies on the same conditions as
 L</decrypt_file>, except file I/O errors -- this method never opens a file. It
@@ -277,7 +291,22 @@ sub _encrypt_fh {
     binmode($ifh, ':raw') or croak "cannot binmode input filehandle: $!";
     binmode($ofh, ':raw') or croak "cannot binmode output filehandle: $!";
 
-    croak "recipients must be an array ref" unless ref($recipients) eq 'ARRAY';
+    # Same skeleton as the shape checks in Crypt::Age::Header -- <param> must
+    # be a <Type>, then a clause carrying the requirement and its reason, then
+    # the fix -- because this guard and Header::create's fire on the identical
+    # caller mistake and only differ in which layer catches it first. This one
+    # always does: create is called below with the list this already accepted,
+    # so its message is unreachable from here and a caller who searched for
+    # one wording had to find the other.
+    #
+    # The reason is this layer's, not create's: create wraps the file key once
+    # per entry, while what a caller of encrypt sees is that every entry ends
+    # up able to decrypt. Nothing is interpolated, for the reason written out
+    # at create -- the mistake that puts a bare string here is the swap of
+    # recipient and identity, so the value is not reliably a public one.
+    croak 'recipients must be an ArrayRef: this method encrypts to every '
+        .'entry, pass [$recipient] rather than $recipient'
+        if ref($recipients) ne 'ARRAY';
     croak "at least one recipient required" unless @$recipients;
 
     # Generate random file key
@@ -389,7 +418,7 @@ The output stream will be in age format and can be decrypted with the C<age> or
 C<rage> command-line tools.
 
 Returns C<1> on success. Dies if a required argument is missing, if
-C<recipients> is not a non-empty array ref, if a recipient string is not a
+C<recipients> is not a non-empty ArrayRef, if a recipient string is not a
 valid Bech32 C<age1...> public key, or if C<binmode> fails on either handle.
 Unlike L</encrypt_file>, this method never opens or closes a file itself --
 C<input> and C<output> are handles the caller already has open -- so it cannot
@@ -404,7 +433,20 @@ sub _decrypt_fh {
     binmode($ifh, ':raw') or croak "cannot binmode input filehandle: $!";
     binmode($ofh, ':raw') or croak "cannot binmode output filehandle: $!";
 
-    croak "identities must be an array ref" unless ref($identities) eq 'ARRAY';
+    # The counterpart to the recipients check in _encrypt_fh, in the same form
+    # and ahead of unwrap_file_key's own check for the same reason. The clause
+    # is this layer's: unwrap_file_key tries each entry against each stanza,
+    # while what a caller of decrypt sees is that the file opens if any one
+    # entry fits.
+    #
+    # Never interpolate $identities. A bare string in this parameter is an
+    # identity, and this croak stands between it and the dereference in
+    # unwrap_file_key that would otherwise put 32 characters of secret key
+    # material into an exception; a message quoting it here would reintroduce
+    # exactly that leak one frame earlier.
+    croak 'identities must be an ArrayRef: this method decrypts with '
+        .'whichever entry matches, pass [$identity] rather than $identity'
+        if ref($identities) ne 'ARRAY';
     croak "at least one identity required" unless @$identities;
 
     # Parse header
