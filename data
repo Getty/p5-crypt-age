@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-08-23T19:22:26Z
+claimed_by: crypt-age-doc-writer
+class: standard
+completed: 2026-08-23T19:22:26Z
+created: 2026-08-23T19:16:00Z
+id: 44
+priority: low
+started: 2026-08-23T19:16:07Z
+status: done
+tags:
+- docs
+title: decrypt_file POD omits the binmode clause the other three wrappers name
+updated: 2026-08-23T19:22:26Z
+---
+
+Gemeldet von crypt-age-doc-writer am Ende von #42, dort bewusst nicht mitgefixt -- ein Ticket, eine Aenderung. Letzte Ecke der Flaeche, die #29/#38/#40/#41/#42 Stueck fuer Stueck abgetragen haben.
+
+lib/Crypt/Age.pm, =method decrypt_file: die "Dies if"-Klausel nennt nach #40 und #42 das fehlende Argument, die identities-Anforderung, den ungueltigen Header, die nicht passende Identity, den MAC-Fehler, Payload-Authentifizierung und File-I/O -- aber nicht, dass binmode auf einem der beiden Handles scheitern kann.
+
+Stand nach #42:
+
+  encrypt_file        -- nennt binmode   OK (#41)
+  encrypt_filehandle  -- nennt binmode   OK
+  decrypt_filehandle  -- nennt binmode   OK (#38)
+  decrypt_file        -- nennt es nicht  dieses Ticket
+
+Der Guard ist real: _decrypt_fh ruft ganz oben binmode($ifh,":raw") und binmode($ofh,":raw") unbedingt auf, jeweils mit "or croak", genau wie _encrypt_fh -- und decrypt_file erreicht das auf demselben Weg, auf dem encrypt_file die binmode-Croaks von _encrypt_fh erreicht. #40 hat es nur deshalb nicht ergaenzt, weil das Ticket auf die identities-Anforderung beschraenkt war.
+
+Fix-Shape: eine Klausel, gleiche Formulierung wie bei den drei Geschwistern, keine Umbauten an dem, was #40 und #42 dort schon stehen haben. Lies den lebenden Guard, bevor du den Satz schreibst -- nicht auf Zuruf aus einem Geschwister kopieren.
+
+Reines POD, kein Verhalten. prove -lr t/ muss gruen bleiben (818 Tests, Interop 120 gegen age 1.2.1 + rage 0.12.1, Testkit 68/0).
+
+Danach: bestaetige explizit, ob die vier Wrapper jetzt wirklich deckungsgleich lesen, oder benenne, was noch abweicht. Ein Changes-Eintrag fuer die ganze Serie #38/#40/#41/#42/#44 liegt bereits uncommitted im Working Tree und behauptet Deckungsgleichheit -- deine Antwort entscheidet, ob dieser Satz so stehen bleiben darf.
+
+test note
+
+POD only, lib/Crypt/Age.pm. Added the binmode clause to decrypt_file's Dies-if list, same wording/position as encrypt_file's: 'if C<binmode> fails on either handle, or on file I/O errors' -- verified against the live guard first: _decrypt_fh croaks unconditionally on binmode() for both the input and the output filehandle before doing anything else, same as _encrypt_fh, and decrypt_file reaches it on the same path encrypt_file already used to reach _encrypt_fh's binmode croaks. No other line touched, no restructuring of #40/#42's clauses.
+
+Coverage check across all four wrappers, read side by side after this edit: encrypt_file and decrypt_file now match in shape (required-arg, shape/empty-list, type-specific validation, binmode, file I/O); encrypt_filehandle and decrypt_filehandle already matched each other and both correctly omit file I/O since they never open a file. All four now name binmode. The Changes entry's claim -- that the four wrappers now document the same failure surface -- is TRUE after this change; I found nothing else diverging.
+
+Runs: prove -lr t/ = 818/818 pass (Files=8). prove -lv t/04-interop.t = 120/120, ran (not skipped) -- which age rage found /home/getty/.local/bin/age 1.2.1 and /home/getty/.local/bin/rage 0.12.1, both exercised 60 tests each. prove -lv t/07-testkit.t = 68 run/0 fail, 75 skipped (33 armor, 42 scrypt-hybrid), all pass. dzil build --no-tgz succeeded; podchecker on the woven Crypt-Age-0.003/lib/Crypt/Age.pm: pod syntax OK; dzil clean removed .build and Crypt-Age-0.003 afterward.
+
+Not committed -- only lib/Crypt/Age.pm touched, Changes left untouched per instruction. Status left as-is.
