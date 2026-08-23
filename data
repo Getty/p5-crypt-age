@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-08-21T05:23:01Z
+claimed_by: crypt-age-doc-writer
+class: standard
+completed: 2026-08-23T19:21:44Z
+created: 2026-08-21T05:21:44Z
+id: 40
+priority: low
+started: 2026-08-21T05:21:52Z
+status: done
+tags:
+- docs
+title: decrypt_file POD omits the identities shape and emptiness requirements
+updated: 2026-08-23T19:21:44Z
+---
+
+Found while doing #38, not fixed there -- one ticket, one change.
+
+lib/Crypt/Age.pm, =method decrypt_file: its "Dies if" clause lists the invalid header, no matching identity, MAC failure, payload authentication failure and file I/O failure -- but never that identities must be a non-empty ArrayRef. encrypt_filehandle documented its recipients counterpart all along, and #38 just gave decrypt_filehandle the same clause, so decrypt_file is now the last of the four wrappers whose list is short.
+
+#29 audited decrypt_file and left its list "unchanged, per audit" -- it did not catch this. So this is the same species of defect #29 and #38 already fixed twice: several descriptions of one failure surface disagreeing on length.
+
+Both guards are real and current: the shape check (#37) and the emptiness one (#36) live in _decrypt_fh, which decrypt_file reaches through.
+
+Fix shape: follow what #38 settled on -- point at L</decrypt>, where the two croak messages are already quoted verbatim, rather than carrying a third copy of them. Verify the quotes there still match the live guards before relying on them.
+
+Pure POD, no behaviour. prove -lr t/ must stay green.
+Fixed. decrypt_file's Dies-if clause now names the identities ArrayRef shape/emptiness requirement, same construction as #38 gave decrypt_filehandle: 'Dies if C<identities> is not a non-empty ArrayRef -- L</decrypt> quotes the two messages, one for the shape and one for the empty list -- if the header is invalid, ...'. Pointed at L</decrypt> rather than a third literal copy, per the #38 decision. Re-verified before relying on it: L</decrypt>'s two quoted messages ('identities must be an ArrayRef: this method decrypts with whichever entry matches, pass [$identity] rather than $identity' and 'identities must not be empty: ... pass at least one identity') match the live croaks in _decrypt_fh (lib/Crypt/Age.pm, #37's shape check and #36's emptiness check) verbatim -- no drift. Only lib/Crypt/Age.pm touched: git status --porcelain shows exactly ' M lib/Crypt/Age.pm', Header.pm and t/ untouched (crypt-age-worker's #39 left alone). Verified: dzil build --no-tgz clean, podchecker on the woven Crypt-Age-0.003/lib/Crypt/Age.pm reports 'pod syntax OK'. prove -lr t/ PASS: 8 files, 805 tests, t/04-interop.t ran (not skipped, which age rage both found) against age 1.2.1 + rage 0.12.1, t/07-testkit.t 68/68. dzil clean run after. Not committed. Checked encrypt_file per instruction, NOT fixed: its Dies-if clause is only 'Dies on error (file not found, permission denied, etc)' -- no enumeration at all, so it doesn't document the recipients ArrayRef shape/emptiness requirement either. Same species of gap as #38/#40, on the encrypt side. Reporting to coordinator for #41, not touching it here.
