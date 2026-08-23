@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-08-21T05:21:04Z
+claimed_by: crypt-age-doc-writer
+class: standard
+completed: 2026-08-23T19:21:40Z
+created: 2026-08-21T04:38:42Z
+id: 38
+priority: low
+started: 2026-08-21T05:18:39Z
+status: done
+tags:
+- docs
+title: decrypt_filehandle POD omits the identities shape and emptiness requirements
+updated: 2026-08-23T19:21:40Z
+---
+
+Found while doing #36, not fixed there -- one ticket, one change.
+
+lib/Crypt/Age.pm, =method decrypt_filehandle: its "Dies if" clause lists the missing argument, invalid header, no matching identity, MAC failure, payload authentication failure and binmode failure -- but not that identities must be a non-empty ArrayRef. The encrypt_filehandle counterpart does mention the recipients requirement ("if recipients is not a non-empty ArrayRef"), so the two symmetric wrappers document the same parameter class differently.
+
+Both guards are real and both were reworded in this series (see #37 for the shape check, #36 for the emptiness one), so the messages to quote are current in _decrypt_fh.
+
+Pre-existing asymmetry, cosmetic, no behaviour involved. Relevant because #29 already found and fixed the same species of defect in =method decrypt -- three descriptions of one failure surface disagreeing on length -- so this is the last known instance of it.
+
+While there: check whether decrypt_filehandle should point at one of the other lists rather than carry its own, which is what #29 settled on for decrypt.
