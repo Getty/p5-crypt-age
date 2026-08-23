@@ -28,6 +28,20 @@ Revision history for Crypt-Age
     move: no valid age file has ever had a stanza-less header, and none of
     the 143 upstream test vectors carries one. The POD of parse and
     parse_from_fh states the requirement and quotes the message.
+  - The four streaming wrappers now document the same failure surface. Each of
+    encrypt_file, encrypt_filehandle, decrypt_file and decrypt_filehandle
+    reaches the same guards, but their "Dies if" clauses had drifted to four
+    different lengths: encrypt_file carried no enumeration at all, only "Dies
+    on error (file not found, permission denied, etc)"; decrypt_file and
+    decrypt_filehandle never named the identities ArrayRef shape and emptiness
+    requirements, though encrypt_filehandle had named the recipients
+    counterpart all along; and decrypt_file did not name the
+    missing-argument guard its own croaks make just as real. All four now
+    enumerate what they die on and point at encrypt or decrypt for the two
+    quoted messages rather than carrying a third and fourth copy of them,
+    which is what kept them out of step in the first place. Every clause was
+    checked against the live croak before being written. No behaviour changes;
+    no guard was added, removed or moved.
   - Crypt::Age::Header->create now refuses an empty recipients ArrayRef
     instead of returning a header with no stanzas. Passing [] satisfied the
     shape check, wrapped the file key for nobody and produced a header of a

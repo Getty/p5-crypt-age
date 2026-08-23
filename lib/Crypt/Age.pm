@@ -390,7 +390,11 @@ Parameters:
 The output file will be in age format and can be decrypted with the C<age> or
 C<rage> command-line tools.
 
-Returns C<1> on success. Dies on error (file not found, permission denied, etc).
+Returns C<1> on success. Dies if a required argument is missing, if
+C<recipients> is not a non-empty ArrayRef -- L</encrypt> quotes the two
+messages, one for the shape and one for the empty list -- if a recipient
+string is not a valid Bech32 C<age1...> public key, if C<binmode> fails on
+either handle, or on file I/O errors.
 Reads and writes the file in 64 KiB chunks, so memory use does not grow with
 the size of the file.
 
@@ -538,9 +542,12 @@ Parameters:
 
 =back
 
-Returns C<1> on success. Dies if the header is invalid, if no identity matches
-any stanza, if the MAC verification fails, if payload authentication fails, or
-on file I/O errors.
+Returns C<1> on success. Dies if a required argument is missing, if
+C<identities> is not a non-empty ArrayRef -- L</decrypt> quotes the two
+messages, one for the shape and one for the empty list -- if the header is
+invalid, if no identity matches any stanza, if the MAC verification fails,
+if payload authentication fails, if C<binmode> fails on either handle, or on
+file I/O errors.
 
 Reads the input and writes the output in 64 KiB chunks, so memory use does not
 grow with the size of the file. B<This means a failure does not undo what was
@@ -592,8 +599,10 @@ every layer the caller had set, C<:encoding> included, so C<input> is read as
 the binary it is and C<output> receives plaintext bytes -- decode them
 yourself if the message was text.
 
-Returns C<1> on success. Dies if a required argument is missing, if the header
-is invalid, if no identity matches any stanza, if the MAC verification fails,
+Returns C<1> on success. Dies if a required argument is missing, if
+C<identities> is not a non-empty ArrayRef -- L</decrypt> quotes the two
+messages, one for the shape and one for the empty list -- if the header is
+invalid, if no identity matches any stanza, if the MAC verification fails,
 if payload authentication fails, or if C<binmode> fails on either handle.
 Unlike L</decrypt_file>, this method never opens or closes a file itself --
 C<input> and C<output> are handles the caller already has open -- so it cannot
