@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-08-21T05:28:23Z
+claimed_by: crypt-age-doc-writer
+class: standard
+completed: 2026-08-23T19:21:53Z
+created: 2026-08-21T05:26:47Z
+id: 42
+priority: low
+started: 2026-08-21T05:26:54Z
+status: done
+tags:
+- docs
+title: decrypt_file POD omits the missing-argument guard the other three wrappers
+  name
+updated: 2026-08-23T19:21:53Z
+---
+
+Found while doing #41, not fixed there -- one ticket, one change. The last corner of the surface #29/#38/#40/#41 cut down.
+
+lib/Crypt/Age.pm, =method decrypt_file: after #40 its "Dies if" clause names the identities requirement, the invalid header, the unmatched identity, the MAC failure, payload authentication and file I/O -- but not that a required argument may be missing. Its own $args{...} // croak makes that guard exactly as real there as in the three siblings, all of which now open with "Dies if a required argument is missing".
+
+State after #41:
+
+  encrypt_filehandle  -- names missing-argument   OK
+  decrypt_filehandle  -- names missing-argument   #38
+  encrypt_file        -- names missing-argument   #41
+  decrypt_file        -- does not                 this ticket
+
+Fix shape: one clause, same wording as the other three, no restructuring of what #40 already put there.
+
+Read the live guard in decrypt_file before writing it -- confirm which arguments are actually required and that the croak fires where the POD will say it does. Do not copy the sentence on faith from a sibling.
+
+Pure POD, no behaviour. prove -lr t/ must stay green. After this, confirm the four wrappers really do read the same, or name what is still off.
+Fixed. decrypt_file's Dies-if clause now opens with the same missing-argument clause the other three wrappers use, no restructuring of #40's work otherwise -- single insertion: 'Dies if a required argument is missing, if C<identities> is not a non-empty ArrayRef -- L</decrypt> quotes the two messages, ...' (was: 'Dies if C<identities> is not a non-empty ArrayRef ...'). Read the live guard before writing the sentence, not taken on faith from a sibling: decrypt_file's own sub has $args{input} // croak "input required", $args{output} // croak "output required", $args{identities} // croak "identities required", in that order, before the file is even opened -- the same shape and the same croak-on-missing-arg pattern as encrypt_file/encrypt_filehandle/decrypt_filehandle, and it fires exactly where the new POD clause says it does (first, ahead of the ArrayRef shape/emptiness check). Only lib/Crypt/Age.pm touched (now four cumulative POD paragraphs across #38/#40/#41/#42); Header.pm and Changes remain crypt-age-worker's parallel #39 work, confirmed untouched by me via git diff -- lib/Crypt/Age.pm showing only the POD paragraphs. t/ untouched. Verified: dzil build --no-tgz clean, podchecker on the woven Crypt-Age-0.003/lib/Crypt/Age.pm reports 'pod syntax OK', dzil clean run after. prove -lr t/ PASS: 8 files, 805 tests, t/04-interop.t ran (not skipped, which age rage both found) against age 1.2.1 + rage 0.12.1, t/07-testkit.t 68/68. Not committed. Symmetry check requested by the ticket: NOT fully closed, one corner remains, NOT fixed here per instruction. Side-by-side of all four Dies-if clauses shows encrypt_file (#41), encrypt_filehandle and decrypt_filehandle all name 'if C<binmode> fails on either handle' -- decrypt_file does not, even though _decrypt_fh calls binmode($ifh,':raw') and binmode($ofh,':raw') unconditionally at its top, exactly as _encrypt_fh does, and decrypt_file reaches it the same way encrypt_file reaches _encrypt_fh's binmode calls. #40 never added it because that ticket was scoped to the identities requirement only. This is the same species of gap #29/#38/#40/#41/#42 have been closing one at a time; recommend a ticket for decrypt_file's missing binmode clause if the surface should close all the way.
