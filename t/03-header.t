@@ -1191,4 +1191,124 @@ my $recipients_empty_msg = 'recipients must not be empty: this method wraps '
         'and is fatal already, which is why unwrap_file_key is not part of this fix');
 }
 
+
+# Ticket #39, the read-side counterpart to #36. The spec's header grammar is
+# "header = v1-line 1*stanza end" (c2sp.org/age, "ABNF definition of file
+# header") -- one or more stanzas, never zero -- and the prose above the ABNF
+# says it again: "followed by one or more recipient stanzas". #36 made
+# Header::create refuse to BUILD such a header on the write side; nothing
+# enforced the same clause on the read side. A version line followed directly
+# by the "---" MAC footer passed every check in parse_from_fh and returned a
+# Header with an empty stanza list and a MAC that even verifies (it is a
+# well-formed MAC over a header the grammar forbids) -- so the file only
+# failed later, at unwrap_file_key, with "No matching identity found", naming
+# the caller's keys as the cause of a file that is addressed to nobody at all.
+#
+# Measured on such a file: rage 0.12.1 refuses it at parse time as "Unknown
+# age format"; age 1.2.1 parses it and reports "no identity matched any of the
+# recipients". This implementation was the most permissive of the three; the
+# guard added in parse_from_fh now refuses at the point the grammar is
+# actually violated, with a message naming that cause, nothing else.
+#
+# The guard sits after the "no valid header MAC line" croak on purpose, so a
+# TRUNCATED header -- a version line and nothing else -- keeps reporting that
+# the handle ran out rather than being folded into the stanza-less message.
+# That boundary is asserted below too, since it is the reason the guard lives
+# where it does and not earlier in the function.
+my $no_stanza_msg = 'age header must carry at least one recipient stanza: '
+    .'the file key is wrapped once per stanza, so a header with none can '
+    .'never be unwrapped by anyone, decrypt a file encrypted to at least one '
+    .'recipient';
+
+{
+    my $mac64 = Crypt::Age::Stanza::encode_base64_no_padding("\x00" x 32);
+    my $no_stanza_header = "age-encryption.org/v1\n--- $mac64\n";
+
+    # parse_from_fh: the entry point the guard actually lives in.
+    {
+        open my $fh, '<:raw', \$no_stanza_header or die "open: $!";
+
+        my ($err, $line, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            $line = __LINE__ + 1;
+            eval { Crypt::Age::Header->parse_from_fh($fh) };
+            $err = $@;
+        }
+
+        # Anchored end to end (only croak's own " at FILE line N." suffix may
+        # follow), so nothing from the file's content -- and nothing else --
+        # is interpolated into the documented message.
+        like($err, qr/^\Q$no_stanza_msg\E(?: at |\z)/,
+            'parse_from_fh refuses a complete, stanza-less header with exactly the documented message');
+        is_deeply(\@warn, [], 'and nothing warns on the way');
+        unlike($err, qr{Crypt/Age/Header\.pm},
+            'it croaks: Header.pm is not blamed as the origin');
+        my $where = quotemeta(__FILE__).' line '.$line;
+        like($err, qr/$where/, 'and it reports the caller position in this test file');
+    }
+
+    # parse: the \$data/\$offset wrapper. It has no guard of its own here --
+    # this checks that it inherits parse_from_fh's, not that it duplicates it.
+    {
+        my $offset = 0;
+        my ($err, $line, @warn);
+        {
+            local $SIG{__WARN__} = sub { push @warn, $_[0] };
+            local $@;
+            $line = __LINE__ + 1;
+            eval { Crypt::Age::Header->parse(\$no_stanza_header, \$offset) };
+            $err = $@;
+        }
+
+        like($err, qr/^\Q$no_stanza_msg\E(?: at |\z)/,
+            'parse refuses the same header with the same message');
+        is_deeply(\@warn, [], 'and nothing warns on the way');
+        my $where = quotemeta(__FILE__).' line '.$line;
+        like($err, qr/$where/, 'reported through parse, the caller position is still this test file');
+        is($offset, 0, 'and the offset ref is left untouched');
+    }
+}
+
+# The truncated header: a version line and nothing after it. This must keep
+# reporting "Invalid age file, no valid header MAC line" -- its cause is that
+# the handle ran out, a different defect from a complete header that simply
+# carries no stanzas. This is the split the guard's placement (after the
+# MAC-line croak, not before it) exists to preserve.
+{
+    my $truncated = "age-encryption.org/v1\n";
+
+    my $offset = 0;
+    my $err = do {
+        local $@;
+        eval { Crypt::Age::Header->parse(\$truncated, \$offset) };
+        $@;
+    };
+
+    like($err, qr/^Invalid age file, no valid header MAC line\b/,
+        'a truncated header (version line only) still reports the MAC-line failure');
+    unlike($err, qr/\Q$no_stanza_msg\E/,
+        'and not the stanza-less message, even though it too parsed zero stanzas');
+}
+
+# Counter-proof: a regular one-stanza header still parses through both entry
+# points, so the two blocks above measure the new guard and not a parser that
+# stopped accepting valid headers.
+{
+    my ($public, $secret) = Crypt::Age::Keys->generate_keypair;
+    my $file_key = Crypt::Age::Primitives->generate_file_key;
+    my $header_text = Crypt::Age::Header->create($file_key, [$public])->to_string;
+
+    my $offset = 0;
+    my $parsed = Crypt::Age::Header->parse(\$header_text, \$offset);
+    is(scalar @{$parsed->stanzas}, 1, 'a normal one-stanza header still parses via parse');
+    is($parsed->unwrap_file_key([$secret]), $file_key,
+        'and still unwraps the file key');
+
+    open my $fh, '<:raw', \$header_text or die "open: $!";
+    my $parsed_fh = Crypt::Age::Header->parse_from_fh($fh);
+    is(scalar @{$parsed_fh->stanzas}, 1, 'and still parses via parse_from_fh directly');
+}
+
 done_testing;

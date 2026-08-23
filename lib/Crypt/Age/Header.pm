@@ -401,6 +401,41 @@ sub parse_from_fh {
     }
     croak "Invalid age file, no valid header MAC line" unless length($mac // '');
 
+    # c2sp.org/age, "ABNF definition of file header":
+    #
+    #     header = v1-line 1*stanza end
+    #
+    # One or more stanzas, never zero, and the prose above that grammar says
+    # it again in words: "followed by one or more recipient stanzas". A
+    # version line followed straight by the MAC footer passed every check
+    # above and parsed into a header with an empty stanza list -- one whose
+    # MAC even verifies, because it is a well-formed MAC over a header the
+    # grammar forbids. Nothing here refused it, so such a file travelled on to
+    # unwrap_file_key and died there with "No matching identity found", naming
+    # the caller's keys as the cause of a file that is addressed to nobody at
+    # all.
+    #
+    # This is an interop difference, not only a tidiness one, which is why it
+    # is refused rather than tolerated. Measured on such a file: rage 0.12.1
+    # rejects it at parse time as "Unknown age format", age 1.2.1 parses it
+    # and reports "no identity matched any of the recipients". This
+    # implementation was the most permissive of the three; it now refuses
+    # where rage does, at the point the grammar is actually violated.
+    #
+    # After the MAC check on purpose. A truncated header -- a version line and
+    # nothing after it -- carries no stanzas either, but its cause is that the
+    # handle ran out, which the croak above already names; only a header that
+    # is complete and stanza-less reaches this line.
+    #
+    # #36 put the same clause on the write side, in create. Nothing is
+    # interpolated here: reaching this croak says nothing about the caller's
+    # arguments, and the header it describes is the file's, not theirs.
+    croak 'age header must carry at least one recipient stanza: the file key '
+        .'is wrapped once per stanza, so a header with none can never be '
+        .'unwrapped by anyone, decrypt a file encrypted to at least one '
+        .'recipient'
+        unless @stanzas;
+
     return $class->new(
         stanzas => \@stanzas,
         _bytes  => $bytes,
@@ -464,6 +499,11 @@ missing
 line (C<-E<gt> type arg1 arg2 ...>) or the C<---> MAC footer (three dashes, a
 space, and a 43-character base64 MAC), before a valid MAC line has been found
 
+=item * the header is complete but carries no recipient stanza at all -- a
+version line followed directly by the C<---> MAC footer. The format's grammar
+is C<header = v1-line 1*stanza end>, one or more, so such a header is
+structurally invalid however well-formed its MAC is
+
 =item * a stanza start line carries an argument that is empty (two spaces in
 a row, or a trailing space) or that contains a byte outside printable ASCII,
 C<0x21>-C<0x7e> -- the format's C<argument = 1*VCHAR>, where C<VCHAR> is RFC
@@ -484,6 +524,20 @@ type, an argument that does not decode to a 32-byte value, or a body that is
 not exactly 32 bytes
 
 =back
+
+The stanza-less header is refused with C<"age header must carry at least one
+recipient stanza: the file key is wrapped once per stanza, so a header with
+none can never be unwrapped by anyone, decrypt a file encrypted to at least
+one recipient">. It used to be accepted: the header parsed, and its MAC even
+verified, since it is a well-formed MAC over a header the grammar forbids. The
+file then failed later in L</unwrap_file_key> with C<"No matching identity
+found">, which names the caller's keys as the cause of a file that is
+addressed to nobody at all. Implementations disagree on when such a file is
+rejected -- C<rage> 0.12.1 refuses it at parse time as C<"Unknown age
+format">, C<age> 1.2.1 parses it and reports C<"no identity matched any of the
+recipients"> -- and this one now refuses where C<rage> does, at the point the
+grammar is violated. L</create> refuses to build such a header on the write
+side.
 
 A stanza of an unrecognized type is kept as a plain L<Crypt::Age::Stanza> and
 is not validated beyond the structure every stanza shares -- the format
@@ -660,6 +714,13 @@ whose body is not exactly 32 bytes. Those are header failures and are raised
 here, before any identity is looked at, rather than being deferred to
 L</unwrap_file_key> and mistaken there for a stanza that simply does not match
 the identity. See L<Crypt::Age::Stanza::X25519/BUILD>.
+
+A header carrying B<no> recipient stanza at all is a header failure for the
+same reason and is raised in the same place. The format's grammar is C<header
+= v1-line 1*stanza end> -- one or more -- so a version line followed directly
+by the C<---> footer is not a header, and letting it through used to surface
+one call later as C<"No matching identity found">, which is the wrong cause
+for a file addressed to nobody. See L</parse_from_fh> for the message.
 
 Stanzas of unrecognized types are kept as plain L<Crypt::Age::Stanza> objects
 and are not validated beyond the structure every stanza shares; the format

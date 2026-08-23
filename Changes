@@ -1,6 +1,33 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - Crypt::Age::Header->parse and ->parse_from_fh now reject a header that
+    carries no recipient stanza at all -- a version line followed directly by
+    the "--- <mac>" footer. The age header grammar is "header = v1-line
+    1*stanza end", one or more, so such a header is structurally invalid, but
+    it used to parse: it returned a header object with an empty stanza list,
+    advanced the caller's offset past it, and its MAC even verified, being a
+    well-formed MAC over a header the grammar forbids. The file then failed a
+    call later in unwrap_file_key with "No matching identity found", which
+    names the caller's keys as the cause of a file that is addressed to
+    nobody at all. It is now refused at parse time with "age header must
+    carry at least one recipient stanza: the file key is wrapped once per
+    stanza, so a header with none can never be unwrapped by anyone, decrypt a
+    file encrypted to at least one recipient", and nothing about the caller's
+    arguments is quoted. decrypt, decrypt_file and decrypt_filehandle see the
+    new message in place of "No matching identity found" for such a file;
+    every other file reports exactly what it reported before, including a
+    truncated header, which keeps "Invalid age file, no valid header MAC
+    line" because its cause is that the input ran out, not that the grammar
+    was broken. This closes the read side of the clause the previous entry
+    closed for the write side, and it is an interop difference as well as a
+    tidiness one: measured on such a file, rage 0.12.1 rejects it at parse
+    time as "Unknown age format" while age 1.2.1 parses it and reports "no
+    identity matched any of the recipients". This implementation was the most
+    permissive of the three and now refuses where rage does. No wire bytes
+    move: no valid age file has ever had a stanza-less header, and none of
+    the 143 upstream test vectors carries one. The POD of parse and
+    parse_from_fh states the requirement and quotes the message.
   - Crypt::Age::Header->create now refuses an empty recipients ArrayRef
     instead of returning a header with no stanzas. Passing [] satisfied the
     shape check, wrapped the file key for nobody and produced a header of a
