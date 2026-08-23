@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-08-21T05:26:19Z
+claimed_by: crypt-age-doc-writer
+class: standard
+completed: 2026-08-23T19:21:49Z
+created: 2026-08-21T05:23:26Z
+id: 41
+priority: low
+started: 2026-08-21T05:23:33Z
+status: done
+tags:
+- docs
+title: encrypt_file POD documents no failure surface at all, including the recipients
+  requirement
+updated: 2026-08-23T19:21:49Z
+---
+
+Found while doing #40, not fixed there -- one ticket, one change. Last of the four wrappers.
+
+lib/Crypt/Age.pm, =method encrypt_file: its whole "Dies if" clause is "Dies on error (file not found, permission denied, etc)". No enumeration, so it documents neither the recipients ArrayRef shape/emptiness requirement nor any of the other failure modes its three siblings now list.
+
+State of the four wrappers after #38 and #40:
+
+  encrypt_filehandle  -- enumerates, points at L</encrypt>   OK
+  decrypt_filehandle  -- enumerates, points at L</decrypt>   fixed in #38
+  decrypt_file        -- enumerates, points at L</decrypt>   fixed in #40
+  encrypt_file        -- "Dies on error (...)"               this ticket
+
+So this closes the surface that #29, #38 and #40 each cut a piece off: several descriptions of one failure surface disagreeing on length.
+
+Fix shape: give it the same construction the other three now share -- enumerate what it actually dies on and point at L</encrypt>, where the recipients messages are quoted, rather than carrying a copy. Read the live guards in the encrypt path first and document what the code does today, not what this body claims; a documented cryptographic assurance callers make security decisions from must be true of the current code.
+
+Pure POD, no behaviour. prove -lr t/ must stay green.
+Fixed. encrypt_file's Dies-if clause now enumerates the live encrypt-path guards and points at L</encrypt> for the recipients messages, instead of the old blanket 'Dies on error (file not found, permission denied, etc)'. New text: 'Dies if a required argument is missing, if C<recipients> is not a non-empty ArrayRef -- L</encrypt> quotes the two messages, one for the shape and one for the empty list -- if a recipient string is not a valid Bech32 C<age1...> public key, if C<binmode> fails on either handle, or on file I/O errors.' Read the live guards first rather than copying decrypt_file's shape, per instruction -- the write path has no MAC-verify/payload-auth/no-identity-matched cases, so none of those were carried over. Enumeration built from: encrypt_file's own $args{...} // croak (required-arg check), _encrypt_fh's binmode croaks and its recipients ArrayRef shape/emptiness croaks (#37/#36), Header::create's 'Unsupported recipient format at index N' croak (reached via _encrypt_fh -> Header::create, its own ArrayRef checks are unreachable from here per the comment in _encrypt_fh), and encrypt_file's own file open/close croaks. encrypt_payload_fh (Primitives.pm) has no croaks of its own on the write side. Finding, not silently fixed: L</encrypt>'s own body does NOT quote or cover the 'Unsupported recipient format' failure -- that message lives only in Header::create and is referenced from the top-level LIMITATIONS section (line ~685), not from =method encrypt itself. My new encrypt_file text states that failure mode as a bare fact, same as encrypt_filehandle already did, and does NOT claim L</encrypt> quotes it -- I did not paper over the gap, I matched the existing (already-shipped) precedent that makes the same true, narrower claim. Only lib/Crypt/Age.pm touched (three cumulative POD paragraphs across #38/#40/#41); Header.pm and Changes show as modified in git status but that is crypt-age-worker's parallel #39 work, not mine -- confirmed via git diff -- lib/Crypt/Age.pm showing only my three paragraphs. t/ untouched. Verified: dzil build --no-tgz clean, podchecker on the woven Crypt-Age-0.003/lib/Crypt/Age.pm reports 'pod syntax OK', dzil clean run after. prove -lr t/ PASS: 8 files, 805 tests, t/04-interop.t ran (not skipped, which age rage found both) against age 1.2.1 + rage 0.12.1, t/07-testkit.t 68/68. Not committed. Answering the symmetry question: NOT fully closed. Three of four now say 'Dies if a required argument is missing' first (encrypt_filehandle, decrypt_filehandle, encrypt_file) but decrypt_file (#40) does not, even though decrypt_file's own $args{...} // croak makes that guard just as real there. Last corner; recommend a ticket against decrypt_file's missing-argument clause.
