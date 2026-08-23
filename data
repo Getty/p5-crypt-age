@@ -1,0 +1,40 @@
+---
+claimed_at: 2026-08-21T05:26:40Z
+claimed_by: crypt-age-worker
+class: standard
+completed: 2026-08-23T19:21:58Z
+created: 2026-08-21T04:38:56Z
+id: 39
+priority: medium
+started: 2026-08-21T05:18:35Z
+status: done
+tags:
+- interop
+- api
+title: parse and parse_from_fh accept a zero-stanza header, which the grammar forbids
+  and rage rejects
+updated: 2026-08-23T19:21:58Z
+---
+
+Found while doing #36, deliberately not fixed there -- that ticket was the write side, this is the read side, and rejecting malformed input is its own change.
+
+The spec grammar is:
+
+    header = v1-line 1*stanza end
+
+One or more. #36 made Header->create refuse to BUILD a zero-stanza header. Nothing enforces the same clause when READING one:
+
+    Crypt::Age::Header->parse(\"age-encryption.org/v1\n--- <b64>\n", \$offset)
+
+returns a header object with stanzas = 0 and advances the offset past it. Such a file gets through header parsing and only fails later, at unwrap_file_key, with "No matching identity found" -- which names the wrong cause, because the file is structurally invalid, not addressed to someone else.
+
+This is an interop difference, not only a tidiness one, and that is why it is medium and not low: rage 0.12.1 refuses such a file at parse time as "Unknown age format". age 1.2.1 parses it and reports "no identity matched any of the recipients". So the three implementations disagree about when the file is rejected, and this one is the most permissive.
+
+Read before writing: the grammar section of c2sp.org/age is normative and short, and the constant table in skill crypt-age-core covers the header layout. Confirm the clause yourself rather than trusting this body.
+
+Fix shape: croak in parse_from_fh when the header ends with no stanzas, with a message naming the cause -- a structurally invalid header -- and not the "no matching identity" one it currently reaches. Message form is settled across #31-#37: <what> must <requirement>: <reason>, <fix>, nothing interpolated. Note that parse_from_fh is the shared entry point, so parse gets it too.
+
+Test: t/03-header.t, alongside the #36 block. Verify against the upstream test kit that no existing vector carries a zero-stanza header -- t/07-testkit.t must stay at 68 run, 0 fail. Check t/04-interop.t still reports 120.
+Implementation landed in the working tree (uncommitted, as instructed). Guard added in Header::parse_from_fh after the MAC-line croak, so parse inherits it; message: "age header must carry at least one recipient stanza: the file key is wrapped once per stanza, so a header with none can never be unwrapped by anyone, decrypt a file encrypted to at least one recipient" -- nothing interpolated. Grammar verified at the source: age.md line 127, 'header = v1-line 1*stanza end', and the prose above it, 'followed by one or more recipient stanzas'. Binaries re-measured on a real zero-stanza file: rage 0.12.1 'Unknown age format' at parse time, age 1.2.1 'no identity matched any of the recipients'. Placed after the MAC check on purpose so a truncated header keeps 'Invalid age file, no valid header MAC line'. Scanned all 143 upstream vectors (decompressing the zlib ones): zero carry a stanza-less header, so the test kit cannot move. Runs: prove -lr t/ 805 PASS; t/07-testkit.t 68 run / 0 fail / 75 skipped; t/04-interop.t 120, RAN against age 1.2.1 and rage 0.12.1. POD of parse and parse_from_fh updated in the same edit, plus a Changes entry. Still open: the regression test in t/03-header.t, which is crypt-age-test-writer's -- t/ was not touched.
+
+Regression test added in t/03-header.t (120 lines, pure addition -- nothing else touched). New block covers: (1) a complete, stanza-less header (version line + '--- <mac>') rejected by parse_from_fh AND by parse with exactly the documented message, anchored end-to-end so nothing is interpolated, with warning/origin/caller-line checks matching the file's existing idiom; (2) the truncated header (version line only, nothing after) still reports 'Invalid age file, no valid header MAC line' and NOT the stanza-less message -- the boundary the guard's placement after the MAC check exists to preserve; (3) counter-proof that a normal one-stanza header still parses via both parse and parse_from_fh. Falsifiability checked by hand: commented out the guard in Header.pm, reran -- 5 of the new subtests went red (259, 262-263, 265-266), all in the new block; restored the guard and diffed lib/Crypt/Age/Header.pm against a pre-edit copy -- byte-identical (md5 0f23c96b...). Runs: prove -lv t/03-header.t 271 tests, all pass. prove -lr t/ 818 tests, all pass (Files=8). prove -lv t/07-testkit.t: 68 run / 0 fail / 75 skipped (144 total incl. meta-tests) -- unchanged, as expected since I touched no lib code. prove -lv t/04-interop.t: RAN, 120 tests, all pass -- against age 1.2.1 and rage 0.12.1 both (which agent /home/getty/.local/bin confirms are both on PATH). Only t/03-header.t touched; lib/Crypt/Age/Header.pm, lib/Crypt/Age.pm, Changes and the karr skill file are exactly as I found them (crypt-age-worker's and crypt-age-doc-writer's uncommitted work). Nothing committed.
