@@ -1,0 +1,85 @@
+---
+block_reason: 'Maintainer fuehrt das Gespraech selbst; Agenten antworten nicht auf
+  GH #1/#4'
+blocked: true
+class: standard
+created: 2026-08-23T18:51:09Z
+id: 43
+priority: high
+status: backlog
+tags:
+- github
+- community
+title: 'GH #1 und #4: polettix bietet Beitraege an und wartet seit Juli auf Antwort'
+updated: 2026-08-31T03:27:51Z
+---
+
+Zwei offene Issues von polettix, beide unbeantwortet. Das sind keine
+Fehlermeldungen, sondern Mitarbeitsangebote -- und die verfallen, wenn niemand
+reagiert.
+
+GH #1 (2026-07-30) "Make header parser stricter and other contributions":
+will das Modul auch fuer symmetrische Verschluesselung nutzen und mitarbeiten.
+Konkret angeboten: strengere Validierung im Header-Parser; danach die
+Stanza-Erzeugung in die ::Stanza-Klasse verlagern, mit einer Registrierung, ueber
+die sich Stanza-Typen fuer bestimmte Typen zustaendig melden, samt einem ersten
+Vorschlag fuer scrypt. Er fragt ausdruecklich: "I dont know if you are already
+working on this and Id avoid duplicating efforts though."
+
+Genau diese Frage steht seit dem 30.07. offen -- und Board #39 (Zero-Stanza-Header,
+in-progress) beruehrt dasselbe Gebiet. Das ist die Doppelarbeit, vor der er
+warnt.
+
+GH #4 (2026-08-11) "Proposal for a ::Simple module":
+Crypt::Age::Simple als Proof of Concept, funktioniert samt eigener Tests, liegt
+unter github.com/polettix/p5-crypt-age (Branch idea/simple). Er fragt, ob es
+in die Distribution soll oder als eigenes Dist -- und bittet im zweiten Fall um
+einen Namensvorschlag (er nennt Crypt::AgeX).
+
+Beides braucht eine Entscheidung von dir, keinen Fix. Zu beantworten:
+1. Arbeitest du selbst am Header-Parser / an den Stanzas? (siehe #39)
+2. Soll ::Simple rein, oder daneben -- und unter welchem Namen?
+
+ENTSCHEIDUNG des Maintainers (2026-08-23), NICHT auf GitHub antworten:
+
+Getty hat mit polettix bereits ausserhalb der Issues geredet und will ihn zum
+Co-Maintainer machen. Das Gespraech fuehrt er selbst, nicht ein Agent. Bis
+dahin bleiben GH #1 und #4 unbeantwortet -- ausdrueckliche Anweisung: erst die
+eigene Arbeit fertig, dann redet er mit ihm.
+
+Zwei Sachentscheidungen sind aber schon gefallen und gelten fuer das Gespraech:
+
+1. scrypt-KDF: CryptX-Pin von 0.067 auf 0.088 anheben, KEINE neue Dependency.
+   Grund: Crypt::KeyDerivation::scrypt_pbkdf kam in CryptX 0.088 (2026-04-23);
+   CryptX ist ohnehin Pflicht. Crypt::ScryptKDF wurde verworfen. Folge, die im
+   Blick bleiben muss: der angehobene Pin trifft File::SOPS und kubernetes-ocp
+   downstream.
+2. Crypt::Age::Simple kommt IN diese Distribution, aber erst NACH dem
+   Registry-/scrypt-Umbau -- dann faellt der Grossteil der "Batterien" aus
+   seinem PoC ohnehin weg und er passt es nur einmal an. Kein eigenes Dist,
+   Crypt::AgeX ist damit vom Tisch.
+
+Rechercheergebnisse fuer das Gespraech (gemessen, nicht behauptet):
+
+- PR #2 und #3 von polettix sind am 2026-08-11 gemergt. Offen ist derzeit KEIN
+  PR. #1 und #4 sind reine Issues mit null Kommentaren -- er hat auf keinen
+  seiner beiden Vorschlaege je eine Antwort bekommen, obwohl seine Arbeit drin
+  ist.
+- Stanza-Dispatch ist tatsaechlich zweimal hartkodiert, sein Vorschlag greift
+  nicht daneben: Header.pm:149 beim Schreiben (/^age1/i -> Stanza::X25519->wrap)
+  und Header.pm:392 beim Lesen (if $type eq "X25519"). Keine Registry.
+- scrypt fehlt vollstaendig; die 42 im Testkit geskippten Vektoren sind genau
+  diese. Die Krypto ist aber schon da: Primitives::wrap_file_key/unwrap_file_key
+  machen bereits ChaCha20-Poly1305 mit Null-Nonce, also exakt den scrypt-Body,
+  und Crypt::PRNG deckt den 16-Byte-Salt.
+- Die Arbeit steckt in der von der Spec geforderten Strenge (c2sp.org/age,
+  "The scrypt recipient type"): genau drei Argumente, kanonisches Base64 ueber
+  16 Byte, Work Factor als ^[1-9][0-9]*$, Body exakt 32 Byte VOR dem
+  Entschluesseln, Obergrenze fuer den Work Factor gegen Partitioning-Oracle --
+  und die Exklusivitaetsregel: ein scrypt-Stanza MUSS der einzige im Header
+  sein, Mischung ist verboten.
+- Diese Exklusivitaetsregel sitzt in Header::create und parse_from_fh, genau
+  den zwei Funktionen, an denen #36 und #39 gerade gearbeitet haben. Das ist
+  die Doppelarbeit, vor der polettix am 30.07. gewarnt hat.
+
+Agent-Verifikation 2026-08-31 (nur Vorbereitung, kein GH-Post, Status unveraendert): gh read-only funktioniert, #1 und #4 beide OPEN, 0 Kommentare -- Angebote weiterhin unbeantwortet. Code-Stand bestaetigt: Stanza-Dispatch weiterhin doppelt hartkodiert (Header.pm write /^age1/i, read type eq 'X25519'), keine Registry. cpanfile pinnt CryptX weiterhin 0.067 (Entscheidung: -> 0.088 fuer scrypt_pbkdf). Vorbedingung 'erst eigene Arbeit fertig' ist erfuellt: k36 und k39 sind done. Antwortentwurf an polettix liegt vor (an Getty uebergeben).
