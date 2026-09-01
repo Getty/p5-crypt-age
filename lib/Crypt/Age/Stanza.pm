@@ -1,6 +1,6 @@
 package Crypt::Age::Stanza;
 # ABSTRACT: Base class for age recipient stanzas
-our $VERSION = '0.003';
+our $VERSION = '0.004';
 use Moo;
 use Carp qw(croak);
 use MIME::Base64 qw(encode_base64 decode_base64);
