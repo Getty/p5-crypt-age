@@ -1,6 +1,6 @@
 Revision history for Crypt-Age
 
-{{$NEXT}}
+0.003     2026-09-01 00:11:25Z
   - Crypt::Age::Header->parse and ->parse_from_fh now reject a header that
     carries no recipient stanza at all -- a version line followed directly by
     the "--- <mac>" footer. The age header grammar is "header = v1-line
