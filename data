@@ -1,0 +1,76 @@
+---
+class: standard
+created: 2026-09-04T21:20:47Z
+id: 47
+priority: high
+status: backlog
+tags:
+- security
+- cve
+- release
+title: CPANSec reply and the 2026-09-18 publication deadline
+updated: 2026-09-05T01:01:09Z
+---
+
+CPANSec (Robert) reported two CVEs on 2026-09-04. The standard window is 14
+days, so publication falls on 2026-09-18; an extension or an earlier
+publication can be requested.
+
+CVE-2026-85783 -- unbounded stanza count. Fixed in k45.
+CVE-2026-85782 -- secret key in exception messages. Already fixed in 0.003;
+CPANSec may publish it as fixed.
+
+TO DO
+1. Send the reply. The text is written and lives at ~/cpansec-reply-crypt-age.md
+   (reproduction with our own numbers, both halves of the fix, the finding that
+   age and rage impose no limit at all, downstream status).
+2. Upload, and pull the downstream pins afterwards (p5-file-sops k192,
+   kubernetes-ocp k135).
+3. ORDERING: CPANSec counts a public commit, PR or issue as publication. The
+   fix commit describes the vulnerability in full, so pushing to
+   github.com/Getty/p5-crypt-age publishes it. Doing that before the upload
+   means the hole is public while the fix is not installable.
+
+No key material in this ticket, no PoC data.
+
+--- 2026-09-04, correction
+The body originally pointed at a separate ticket for the upload; none was
+created, so that point belongs here. Approval for an upload is the maintainer's
+alone and is never triggered by an agent.
+
+--- 2026-09-04, crypt-age-release-checker audit (against 6d9dcf2, unpushed)
+Ready to go out, no blockers found.
+- Changes {{$NEXT}}: covers exactly a3c5c30..6d9dcf2. Numbers re-measured and
+  confirmed (0.002 s refusal for the 382 KB/4000-stanza header, 3.95 ms ->
+  2.71 ms / -31% hoisting gain, both reproduced on this machine within 1%).
+- $VERSION: 0.004, consistent across all 6 lib/ modules; META.json builds as
+  version 0.004.
+- cpanfile: no new dependency needed. NOTE: the audit called Crypt::Misc
+  (slow_eq) newly used in Header.pm -- it is not. slow_eq arrived with 93fad42
+  and 6d9dcf2 does not touch it. The conclusion still holds: CryptX >= 0.067
+  covers it.
+- dist.ini: copyright fields set, no gather_exclude_match,
+  .claude/settings.local.json confirmed absent from the build.
+- dzil build clean; dzil test --release 879/879 green (871 + POD syntax +
+  Changes content), in the built tree and not just the repo.
+- Interop NOT skipped: t/04-interop.t ran against BOTH binaries (age 1.2.1,
+  rage 0.12.1), 128 tests (64 each), including the new CLI-generated
+  301-recipient file (refused by default, read correctly with max_stanzas=350).
+- POD: max_stanzas documented consistently at all 5 entry points and verified
+  against the code; the identity_keys refactor is a pure extraction from the
+  old unwrap body.
+- Leak scan: no key material, plaintext or PoC bytes in Changes, POD, commit
+  6d9dcf2 or the new tests.
+- Left unverified by the checker: the 50000-stanza/8.9 s (age) and
+  4000-stanza/5.8 s (rage) reference numbers. Those come from measurements made
+  on this machine on 2026-09-04 with time age -d / time rage -d against the
+  generated attack headers (8.885 s and 5.812 s); the checker simply did not
+  repeat them.
+
+--- 2026-09-05, timing decision
+The CPAN upload and the CPANSec mail go out together, so the fix is
+installable the moment the hole becomes public. The mail tells CPANSec that
+2026-09-18 works as planned, and that publishing sooner is fine too, because
+no protective window remains. IMPORTANT for the ordering: the mail claims
+"goes to CPAN at the same moment as this mail", so the upload has to be
+through before it is sent, or the sentence is untrue.
