@@ -1,0 +1,76 @@
+---
+claimed_at: 2026-09-04T21:28:20Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-04T20:40:18Z
+id: 45
+priority: high
+started: 2026-09-04T21:04:28Z
+status: review
+tags:
+- security
+- cve
+- header
+title: 'CVE-2026-85783: unbounded stanza count in the header -> DoS on decrypt'
+updated: 2026-09-05T00:58:47Z
+---
+
+CPANSec report of 2026-09-04 (Robert), publication planned for 2026-09-18.
+Affected: Crypt-Age 0.001 through 0.003 (every release). Downstream: File::SOPS.
+
+PROBLEM
+Header::unwrap_file_key tries every identity against every X25519 stanza. Each
+attempt costs an X25519 scalar multiplication plus HKDF plus a
+ChaCha20-Poly1305 open. The stanza count is bounded nowhere in the parser, and
+the header MAC cannot be checked first -- its key is derived from the file key,
+which does not exist until some stanza has already been unwrapped. So 98 bytes
+of attacker-chosen header buy one scalar multiplication, and the cost scales as
+identities x stanzas.
+
+MEASUREMENTS (this machine, 0.003, the report PoC reproduced unchanged)
+  100 stanzas    9 KB ->  0.36 s
+  1000 stanzas  95 KB ->  3.75 s
+  4000 stanzas 382 KB -> 15.70 s   (the report measured 5.1 s on its machine)
+  => ~3.9 ms per stanza, linear.
+
+COMPARED WITH THE REFERENCE IMPLEMENTATIONS (same 4000-stanza header)
+  go age 1.2.1  0.57 s      rage 0.12.1  5.81 s
+  go age with 50000 stanzas: 8.9 s -> upstream imposes NO stanza limit at all,
+  it is simply ~27x faster per stanza. The DoS is a property of the format that
+  all three implementations share; we are the slowest reader.
+
+THE INTEROP CEILING THAT DECIDES THE CAP (measured)
+  age -R with 300 recipients writes a 29 KB header file without complaint.
+  A real 301-recipient file from age 1.2.1, our identity last: 1.17 s, decrypts
+  correctly. A cap below 301 would reject exactly that legitimate file.
+  Upstream test kit: 3 stanzas at most (94 of 112 carry one, 15 two, 3 three).
+
+FIX, in two parts
+1. Cap the stanza count in parse_from_fh/parse. The counter $n already exists
+   there. The value is a maintainer decision, because too low a cap breaks
+   legitimate age files.
+2. Stanza::X25519::unwrap re-derives the identity on every stanza
+   (decode_secret_key, import_key_raw, export_key_raw). That depends on the
+   identity only, never on the stanza -> hoist it out of the loop; the report
+   estimates ~36% of the per-stanza cost. The remaining ~64% is the scalar
+   multiplication and is inherent to the format.
+
+NOT part of this ticket: CVE-2026-85782 (secret key in exception messages) was
+already fixed in 0.003; CPANSec will publish it as fixed.
+
+--- 2026-09-04, maintainer decision
+Cap = 128 stanzas by default, configurable through max_stanzas. It admits any
+real file up to 128 recipients, caps the attack at ~0.3 s, and the
+301-recipient file stays readable with an explicit max_stanzas.
+
+--- 2026-09-04, handed off for review
+Fix committed as 6d9dcf2, deliberately NOT pushed -- the maintainer pushes it
+together with the upload, because CPANSec counts a public commit as
+publication. Contains: the max_stanzas cap (default 128, enforced inside the
+read loop before any crypto runs) and the hoisted identity derivation (-31%).
+Verified: PoC 15.7 s -> 0.002 s, boundary exactly 128/129, a real
+301-recipient file from age 1.2.1 refused by default and readable with
+max_stanzas. prove -lr t/ 871 tests PASS; t/04-interop.t ran against BOTH
+binaries (age 1.2.1, rage 0.12.1), 128 tests; t/07-testkit.t 68 of 143 vectors,
+75 skipped as before. Still open: the upload (k47), downstream pins
+(p5-file-sops k192, kubernetes-ocp k135), scrypt work factor (k46).
