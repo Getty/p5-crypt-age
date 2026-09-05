@@ -1,0 +1,42 @@
+---
+class: standard
+created: 2026-09-04T21:20:29Z
+id: 46
+priority: high
+status: backlog
+tags:
+- security
+- scrypt
+- header
+title: 'scrypt stanzas: bound the work factor BEFORE implementing the recipient type'
+updated: 2026-09-05T00:59:01Z
+---
+
+Falls out of the work on k45 (CVE-2026-85783) and has to be decided BEFORE
+scrypt is built, not after.
+
+The stanza cap from k45 bounds the NUMBER of stanzas. For X25519 that is
+enough, because every stanza costs a constant amount (one scalar
+multiplication, ~2.7 ms after the hoisting). For scrypt it is not: there the
+work factor is a decimal number carried IN the header and executed by the
+reader before anything is authenticated -- exactly the property that made k45 a
+CVE, except that this time the attacker picks the per-stanza cost freely
+instead of having to buy it 98 bytes at a time.
+
+A cap of 128 stanzas multiplied by an arbitrary work factor is not a cap.
+
+TO DO before scrypt is built
+1. Read c2sp.org/age, the scrypt recipient type section: the spec constrains
+   what a reader may do with the work factor. Read it first, then decide --
+   not the other way round.
+2. Measure what age 1.2.1 and rage 0.12.1 actually accept as an upper bound
+   (empirically, the way k45 was measured), so that a limit here does not
+   reject a file the reference implementations write.
+3. Decide whether the limit becomes configurable the way max_stanzas is.
+4. Also: the spec requires an scrypt stanza to be the ONLY stanza in the
+   header. That removes the identities x stanzas multiplication -- check
+   whether it changes the arithmetic.
+
+Context: k43 records that scrypt is to come from CryptX 0.088
+(Crypt::KeyDerivation::scrypt_pbkdf) without adding a dependency.
+The CPANSec report behind k45 arrived 2026-09-04.
