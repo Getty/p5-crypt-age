@@ -1,0 +1,89 @@
+---
+class: standard
+created: 2026-09-04T21:20:29Z
+id: 46
+priority: high
+status: backlog
+tags:
+- security
+- scrypt
+- header
+title: 'scrypt stanzas: bound the work factor BEFORE implementing the recipient type'
+updated: 2026-09-09T04:52:38Z
+---
+
+Falls out of the work on k45 (CVE-2026-85783) and has to be decided BEFORE
+scrypt is built, not after.
+
+The stanza cap from k45 bounds the NUMBER of stanzas. For X25519 that is
+enough, because every stanza costs a constant amount (one scalar
+multiplication, ~2.7 ms after the hoisting). For scrypt it is not: there the
+work factor is a decimal number carried IN the header and executed by the
+reader before anything is authenticated -- exactly the property that made k45 a
+CVE, except that this time the attacker picks the per-stanza cost freely
+instead of having to buy it 98 bytes at a time.
+
+A cap of 128 stanzas multiplied by an arbitrary work factor is not a cap.
+
+TO DO before scrypt is built
+1. Read c2sp.org/age, the scrypt recipient type section: the spec constrains
+   what a reader may do with the work factor. Read it first, then decide --
+   not the other way round.
+2. Measure what age 1.2.1 and rage 0.12.1 actually accept as an upper bound
+   (empirically, the way k45 was measured), so that a limit here does not
+   reject a file the reference implementations write.
+3. Decide whether the limit becomes configurable the way max_stanzas is.
+4. Also: the spec requires an scrypt stanza to be the ONLY stanza in the
+   header. That removes the identities x stanzas multiplication -- check
+   whether it changes the arithmetic.
+
+Context: k43 records that scrypt is to come from CryptX 0.088
+(Crypt::KeyDerivation::scrypt_pbkdf) without adding a dependency.
+The CPANSec report behind k45 arrived 2026-09-04.
+
+MAINTAINER DECISION 2026-09-09: max_work_factor, default 22, configurable
+exactly like max_stanzas in lib/Crypt/Age/Header.pm.
+
+No code lands now. There is no scrypt parser to guard -- lib/Crypt/Age/Stanza/
+holds X25519.pm only -- so an attribute today would be speculative. This
+ticket records the requirement; the cap is built together with the recipient
+type.
+
+RESULTS FOR THE FOUR TODO POINTS
+
+1. Spec (c2sp.org/age, scrypt recipient type). On the work factor the spec
+   only SHOULDs: "the identity implementation SHOULD apply an upper limit",
+   no number. What it MUSTs instead, and what the cap has to be built
+   alongside:
+     * stanza body is exactly 32 bytes, checked BEFORE any decryption attempt
+     * work factor is decimal, no leading zero: ^[1-9][0-9]*$
+     * an scrypt stanza must be the ONLY stanza in the header
+
+2. Upper bound of the reference implementations.
+   READ in the age source (not measured here): maxWorkFactor defaults to 22,
+   SetMaxWorkFactor allows at most 30; age writes 18.
+   VERIFIED in the vendored testkit: vector scrypt_work_factor_23 expects
+   "header failure", comment "work factor is very high, would take a long time
+   to compute". So a limit above 22 breaks the testkit, and 22 accepts
+   everything age writes itself. The plain "scrypt" vector uses 10.
+   STILL OPEN: rage 0.12.1 -- what it writes by default and whether it reads
+   22. Measurement in flight, result appended separately.
+
+3. Configurable: yes, see the decision above.
+
+4. "Only stanza" confirmed as a MUST by the spec and by two vectors that both
+   expect "header failure": scrypt_and_x25519 and scrypt_double. That removes
+   the identities x stanzas multiplication for scrypt: exactly one scrypt
+   invocation per file, bounded by the work factor alone. The k45 stanza cap
+   therefore does not bound scrypt at all -- max_work_factor is the only thing
+   that does, which is why it is a precondition and not a follow-up.
+
+REQUIREMENTS THIS TICKET WAS MISSING
+The regex and the 32-byte body above are MUSTs with their own vectors, not
+niceties. They belong in the acceptance list next to the limit.
+
+ACCEPTANCE
+The 26 scrypt vectors under t/testkit/vectors/, currently skipped by name in
+t/07-testkit.t:233. Ten of them exercise the work factor parser alone (hex,
+leading zero decimal and octal, leading plus, negative, overflow, zero,
+missing, leading and trailing garbage, wrong).
