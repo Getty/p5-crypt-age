@@ -1,6 +1,6 @@
 Revision history for Crypt-Age
 
-{{$NEXT}}
+0.004     2026-09-17 22:33:50Z
   - SECURITY (CVE-2026-85783): a header's recipient stanzas are now capped,
     at 128 by default, and the cap is enforced while the header is read
     rather than after it. Every X25519 stanza costs a scalar multiplication,
