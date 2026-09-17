@@ -1,6 +1,6 @@
 package Crypt::Age::Stanza::X25519;
 # ABSTRACT: X25519 recipient stanza for age encryption
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 use Moo;
 use Carp qw(croak);
 use Crypt::Age::Keys;
