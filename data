@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-09-17T22:30:02Z
+created: 2026-09-10T07:57:21Z
+id: 48
+priority: low
+started: 2026-09-17T22:30:02Z
+status: done
+tags:
+- deferred
+- external-contrib
+- embargo
+title: 'GH#4 (polettix ::Simple module): deferred until after k46 + CVE embargo'
+updated: 2026-09-17T22:30:02Z
+---
+
+GitHub-Issue #4: polettix schlägt ein Crypt::Age::Simple-Convenience-Modul vor. ENTSCHEIDUNG Getty (via Koordinator perl-developer-3f, 2026-09-10): ZURÜCKGESTELLT bis nach k46 UND nach dem CVE-Embargo. Gründe: polettix' ::Simple ist ein un-adaptierter PoC auf externem Fork-Branch (idea/simple), teils scrypt-abhängig — scrypt (k46) ist bewusst 'nicht jetzt' zurückgestellt — und das Repo steht unter CVE-Embargo (kein Push). NICHTS gelandet, GitHub-Issue NICHT angefasst/geschlossen (macht Getty). Empfehlung für später (nach k46/Embargo): polettix' Adaptions-Angebot ('I can work to adapt it') aufgreifen bzw. nur die X25519-Convenience-Teile übernehmen, scrypt-abhängige Teile erst mit scrypt-Support. Annotiert von Fleet Worker C.
+
+Closing per maintainer (Getty): polettix adaptiert ::Simple selbst, karr-Card nicht mehr noetig. GH-Issue #4 UNANGETASTET (Getty handhabt das GitHub-Issue). k46 (scrypt) bleibt bewusst im Backlog.
