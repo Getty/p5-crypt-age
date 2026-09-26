@@ -2,7 +2,7 @@
 name: crypt-age-doc-writer
 description: "Write and maintain Crypt::Age POD in the [@Author::GETTY] house format — inline =method / =attr / =func next to the code they document, SYNOPSIS, SEE ALSO. Knows that a documented cryptographic claim must be true of the current code, since callers make security decisions from it. One module at a time; specify the path."
 model: sonnet
-allowed-tools: Read, Edit, Grep, Glob
+disallowedTools: Write, NotebookEdit, Bash
 briefing:
   skills:
     - crypt-age-core

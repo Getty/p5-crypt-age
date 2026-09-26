@@ -2,7 +2,6 @@
 name: crypt-age-test-writer
 description: "Write Crypt::Age tests — unit tests under t/ and interop tests that drive the real age binary in both directions. Knows the CLI resolution and skip_all trap, the keypair/tempdir fixture pattern, and that a Perl-to-Perl round trip proves nothing about the wire format. Use for test additions, regression scaffolding, and reproducing interop failures."
 model: sonnet
-allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
     - crypt-age-core
