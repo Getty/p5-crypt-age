@@ -7,7 +7,7 @@ briefing:
   skills:
     - crypt-age-core
     - getty-perl-core
-    - kanban-issues-karr-cli
+    - kanban-issues-karr-ticket
 ---
 
 You are the crypt-age-test-writer.

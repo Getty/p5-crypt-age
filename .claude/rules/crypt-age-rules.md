@@ -32,7 +32,7 @@ Depends on whether the Agent/Task tool is available to you.
 
 - **You can spawn subagents** (orchestrating main agent): Do NOT touch behavior-relevant
   code yourself — delegate. Your lane: coordinate, inspect, plan, review diffs, run
-  tests, manage git, edit non-behavioral docs. Why: only the `crypt-age-*` agents get
+  tests, edit non-behavioral docs. Why: only the `crypt-age-*` agents get
   their skills force-loaded via `briefing.skills`; you get no briefing and would touch
   format-critical crypto with too little context.
 
@@ -40,7 +40,7 @@ Depends on whether the Agent/Task tool is available to you.
   |---|---|
   | Implement / refactor / debug anything under `lib/` | `crypt-age-worker` (default) |
   | Write/extend tests, reproduce interop failures | `crypt-age-test-writer` |
-  | Pre-release audit | `crypt-age-release-checker` |
+  | Commits, `Changes`, card → done, pre-release audit | `crypt-age-release-manager` |
   | POD | `crypt-age-doc-writer` |
 
 - **You cannot spawn subagents** (you ARE a `crypt-age-*` agent): The delegation lock
@@ -49,6 +49,9 @@ Depends on whether the Agent/Task tool is available to you.
 Behavior-relevant = anything under `lib/`, the tests, and any change to the header text,
 MAC computation, key derivation, stanza serialization, Bech32 encoding or payload
 chunking. `README.md` and `Changes` wording are not.
+
+**Only `crypt-age-release-manager` commits.** A worker leaves a commit-ready tree and hands its card
+to `review`; you then dispatch `crypt-age-release-manager` to cut the commit and close the card.
 
 ## Interop is the product — a green suite is not a proof
 
@@ -105,7 +108,7 @@ don't invoke the skill first, just use it. Board state lives in `refs/karr/*`.
 - `karr move ID in-progress --claim NAME` — start · `karr handoff ID --claim NAME --note "…"` — to review
 
 Serialize board mutations when fanning out: keep implementation parallel, then loop the
-`karr move`/`handoff`/`sync` calls sequentially. Full command surface: skill `kanban-issues-karr-cli`.
+`karr move`/`handoff`/`sync` calls sequentially. Full command surface: skill `kanban-issues-karr-coordination`.
 
 ## Release — never without permission
 

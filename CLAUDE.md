@@ -55,13 +55,13 @@ principle and the lane boundaries are in `.claude/rules/crypt-age-rules.md`.
 |---|---|
 | Implement / refactor / debug anything under `lib/` | `crypt-age-worker` (default) |
 | Write/extend tests, reproduce interop failures | `crypt-age-test-writer` |
-| Pre-release audit | `crypt-age-release-checker` |
+| Commits, `Changes`, card → done, pre-release audit | `crypt-age-release-manager` |
 | POD | `crypt-age-doc-writer` |
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live under `.claude/skills/` —
 `getty-perl-core`, `getty-perl-moo` and `getty-perl-release-author-getty` are hardlinked
-from `~/dev/skills/perl/`, `kanban-issues-karr-cli` from `~/dev/karr/`; `crypt-age-core`
+from `~/dev/skills/perl/`, `kanban-issues-karr-coordination` from `~/dev/karr/`; `crypt-age-core`
 is owned by this repo.
 
 Work is coordinated on the repo's `karr` board (`karr board`).

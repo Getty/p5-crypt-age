@@ -5,8 +5,8 @@ model: sonnet
 allowed-tools: Read, Edit, Grep, Glob
 briefing:
   skills:
-    - getty-perl-release-author-getty
     - crypt-age-core
+    - getty-perl-pod
 ---
 
 You are the crypt-age-doc-writer for **Crypt::Age**.
