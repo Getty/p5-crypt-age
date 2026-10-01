@@ -1,5 +1,7 @@
 Revision history for Crypt-Age
 
+{{$NEXT}}
+
 0.005     2026-10-01 16:25:03Z
   - Reading a header no longer overwrites the caller's $_. The header parser
     read its lines with a bare while (<$fh>), which assigns to the global $_,

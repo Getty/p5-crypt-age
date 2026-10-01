@@ -79,7 +79,7 @@ See L</LIMITATIONS> below for what this module does not implement.
 
 =cut
 
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 
 sub generate_keypair {
     my ($class) = @_;
