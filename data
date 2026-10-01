@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-10-01T13:49:59Z
+claimed_by: p5-crypt-age
+class: standard
+created: 2026-10-01T04:29:47Z
+id: 49
+priority: high
+started: 2026-10-01T13:49:59Z
+status: review
+tags:
+- bug
+title: Header-Parser überschreibt globales $_
+updated: 2026-10-01T13:49:59Z
+---
+
+lib/Crypt/Age/Header.pm:394 und :448 lesen mit while (<$fh>) ohne local $_ bzw. lexikalische Variable. Jeder Aufrufer, der in einer Schleife über $_ entschlüsselt (File::SOPS->decrypt, z. B. for (@files) { decrypt($_) }), bekommt danach falsche Werte. Gefunden in kubernetes-ocp k212 (2026-10-01). Fix: while (my $line = <$fh>) bzw. local $_; Regressionstest: $_ vor/nach parse_from_fh identisch.
+
+2026-10-01 13:49 Done: Header.pm parse_from_fh reads stanza and body lines into lexicals ($line/$body_line) instead of bare while (<$fh>), so the caller's $_ survives. Sweep of all subs in lib/ via B::Concise: no other implicit $_ use (all for loops use my, map in Keys.pm is fine). Red-first test t/08-topic-preserved.t covers parse_from_fh (incl. rejected header), parse, decrypt, decrypt_file, decrypt_filehandle against global $_, for(@list) alias and read-only alias. prove -lr t: 925 tests PASS (interop ran against rage 0.12.1, testkit 68/68). Commit e04a0a2 (local, not pushed), Changes entry under {{$NEXT}}, Crypt-Age-0.005.tar.gz built.
