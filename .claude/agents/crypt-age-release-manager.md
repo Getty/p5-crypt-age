@@ -8,6 +8,7 @@ briefing:
     - getty-perl-release-author-getty
     - getty-perl-core
     - crypt-age-core
+    - crypt-age-proof
     - kanban-issues-karr-ticket
 ---
 

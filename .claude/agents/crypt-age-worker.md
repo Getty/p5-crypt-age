@@ -5,6 +5,7 @@ model: inherit
 briefing:
   skills:
     - crypt-age-core
+    - crypt-age-proof
     - getty-perl-core
     - getty-perl-moo
     - kanban-issues-karr-ticket

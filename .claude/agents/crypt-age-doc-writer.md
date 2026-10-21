@@ -6,6 +6,7 @@ disallowedTools: Write, NotebookEdit, Bash
 briefing:
   skills:
     - crypt-age-core
+    - crypt-age-proof
     - getty-perl-pod
 ---
 

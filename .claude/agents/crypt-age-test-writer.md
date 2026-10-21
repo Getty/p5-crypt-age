@@ -5,6 +5,7 @@ model: sonnet
 briefing:
   skills:
     - crypt-age-core
+    - crypt-age-proof
     - getty-perl-core
     - kanban-issues-karr-ticket
 ---
