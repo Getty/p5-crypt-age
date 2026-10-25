@@ -49,7 +49,8 @@ what it ran and what it skipped. Always say which of the runs you did.
 ## Delegation
 
 Delegate behavior-relevant code to the right agent instead of touching it yourself — the
-principle and the lane boundaries are in `.claude/rules/crypt-age-rules.md`.
+principle is a shared house rule (skilletor bundle `getty-cpan-dist@getty`); the lane
+boundaries are in `.claude/rules/crypt-age-rules.md`.
 
 | Task | Agent |
 |---|---|
