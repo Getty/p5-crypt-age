@@ -1,6 +1,8 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - The skill perl-crypt-age ships in .claude/skills/ for projects that call
+    Crypt::Age: install it with skilletor as perl-crypt-age@p5-crypt-age.
 
 0.005     2026-10-01 16:25:03Z
   - Reading a header no longer overwrites the caller's $_. The header parser
