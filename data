@@ -1,0 +1,19 @@
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":48,"ts":"2026-09-10T07:57:21Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":48,"ts":"2026-09-10T07:57:41Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":47,"ts":"2026-09-17T22:29:41Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":47,"ts":"2026-09-17T22:29:47Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":48,"ts":"2026-09-17T22:29:55Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":48,"ts":"2026-09-17T22:30:02Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":49,"ts":"2026-10-01T04:29:47Z"}
+{"action":"handoff","agent":"p5-crypt-age","detail":"review","task_id":49,"ts":"2026-10-01T13:49:59Z"}
+{"action":"edit","agent":"p5-crypt-age","detail":"review","task_id":49,"ts":"2026-10-18T05:39:15Z"}
+{"action":"move","agent":"p5-crypt-age","detail":"done","task_id":49,"ts":"2026-10-18T05:39:16Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":46,"ts":"2026-10-18T06:04:54Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":46,"ts":"2026-10-25T02:24:08Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"todo","task_id":46,"ts":"2026-10-25T02:27:06Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"todo","task_id":46,"ts":"2026-10-25T02:27:11Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":50,"ts":"2026-10-30T21:38:57Z"}
+{"action":"move","agent":"perl-developer","detail":"in-progress","task_id":50,"ts":"2026-10-30T21:46:29Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"in-progress","task_id":50,"ts":"2026-10-30T21:50:03Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"done","task_id":50,"ts":"2026-10-30T21:50:08Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"done","task_id":50,"ts":"2026-10-30T21:51:00Z"}
