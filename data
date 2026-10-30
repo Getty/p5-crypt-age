@@ -1,0 +1,55 @@
+---
+class: standard
+completed: 2026-10-30T21:50:08Z
+created: 2026-10-30T21:38:57Z
+id: 50
+priority: medium
+started: 2026-10-30T21:46:29Z
+status: done
+tags:
+- skills
+- docs
+- escalated-from:kubernetes-ocp#243
+title: Consumer skill for using Crypt::Age from other projects (working name perl-crypt-age)
+updated: 2026-10-30T21:51:00Z
+---
+
+kubernetes-ocp encrypts its keys and secrets with Crypt::Age and has no skill for using
+it. Working name: `perl-crypt-age`.
+
+## What the consumer calls today (kubernetes-ocp at 3b4c8c7)
+
+- `Crypt::Age->encrypt(...)` — both recipient mode and password mode (lib/OCP/Keys.pm)
+- `Crypt::Age->decrypt(ciphertext => …, identities => …)` — lib/OCP/Keys.pm, lib/OCP/Secrets.pm
+- `Crypt::Age->generate_keypair`
+- `Crypt::Age::Keys->decode_public_key`, `->public_key_from_secret` (key validation in lib/OCP/Cmd/Keys/Operator/Add.pm)
+
+Worth covering for consumers: recipients vs identities, password mode and its cost,
+key string formats and how to validate one, how a wrong key or a corrupted
+file surfaces, interop with the age/rage binaries (what a consumer can rely on), and the
+`$_` fix of 0.005 as the minimum version to pin.
+
+## Why
+
+This repo's own skill is a maintainer skill: it is written as "load before editing <this
+dist>". A consumer project (here: kubernetes-ocp) needs the other half — how to *use* the
+module correctly from outside — and must not install the maintainer skill, which would
+fire on the wrong tasks. Precedent: kubernetes-rest ships `perl-kubernetes-rest` next to
+`kubernetes-rest-core`; io-k8s-p5 ships `perl-io-k8s-kubernetes-classes` next to
+`io-k8s-core`. The skill lives here because this repo owns its subject (skill
+`getty-skill-library`, "Where a skill lives"); consumers install it as `<name>@<this-repo>`.
+
+## Done when
+
+- A tracked `.claude/skills/<name>/SKILL.md` exists here, its description written as a
+  trigger for consumer work ("Use when calling <Module> from another project — …"), with
+  no overlap with the maintainer skill (link to it for internals instead).
+- The name follows the house naming rule (skill `getty-skill-library`, "Naming") and does
+  not collide with anything in `skilletor available`. Working name below; the repo's
+  agent decides.
+- It covers the surface a consumer actually calls (list below), the argument and return
+  shapes, how errors surface, and the traps a caller can step into — mined from the code
+  and tests (skill `skill-mining`), not from memory.
+- Wiring it into kubernetes-ocp is that board's card (see escalated-from), not this one.
+
+2026-10-30 21:51 Done: .claude/skills/perl-crypt-age/SKILL.md (94 lines) plus a Changes entry, commit d24d79f, pushed. Claims mined from lib/ and t/; round trips and error texts confirmed with perl -Ilib; interop suite green against age 1.2.1 and rage 0.12.1. Finding: Crypt::Age has no passphrase/scrypt mode and no armor. The password layer kubernetes-ocp uses is its own PBKDF2 + AES-GCM in OCP::Keys; the skill states that scope.
