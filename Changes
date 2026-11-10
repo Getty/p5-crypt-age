@@ -1,6 +1,10 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
+  - The distribution now declares perl 5.010 as its minimum. The code uses the
+    defined-or operator, a syntax error before 5.10, but the metadata named no
+    perl at all, so installers on older perls tried to build it and failed at
+    compile time instead of refusing up front.
   - The skill perl-crypt-age ships in .claude/skills/ for projects that call
     Crypt::Age: install it with skilletor as perl-crypt-age@p5-crypt-age.
 
