@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-11-10T02:07:16Z
+claimed_by: k51-perl-minimum
+class: standard
+completed: 2026-11-10T02:07:16Z
+created: 2026-11-10T02:00:35Z
+id: 51
+priority: high
+started: 2026-11-10T02:07:16Z
+status: done
+tags:
+- release
+- prereqs
+title: The cpanfile declares no minimum perl although the code needs at least 5.10
+updated: 2026-11-10T02:07:16Z
+---
+
+Found by the hub pre-release smoke (2026-11-10): META carries no runtime requires on perl, so installers and smokers on 5.8 try the dist. lib/ uses the defined-or operator (// and //=, e.g. Crypt/Age.pm line 113, Header.pm 481, Stanza/X25519.pm 245), which is a syntax error before 5.10. Done = the cpanfile requires the perl version the code and its required dependencies (Moo, CryptX, ...) really need, measured (Perl::MinimumVersion / perlver over lib, bin and t, plus the declared minimum of each runtime dependency), a Changes entry, suite green.
+
+Commit 4cff3ee on k51-perl-minimum. Measured by hand (Perl::MinimumVersion not installed): only // and //= need 5.10; no say/state/given/named captures/postfix deref. Deps: Moo 5.006, CryptX 5.006, namespace::clean 5.008001 -> 5.010 is the floor. Suite: 9 files, 925 tests PASS; interop ran with rage 0.12.1, testkit 68/68, 75 skipped (armor 33, scrypt/hybrid 42).
