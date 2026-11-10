@@ -1,10 +1,10 @@
 Revision history for Crypt-Age
 
 {{$NEXT}}
-  - The distribution now declares perl 5.010 as its minimum. The code uses the
-    defined-or operator, a syntax error before 5.10, but the metadata named no
-    perl at all, so installers on older perls tried to build it and failed at
-    compile time instead of refusing up front.
+  - The distribution declares perl 5.018 as its minimum, the oldest perl
+    its test suite passes on.
+  - Crypt::Age::Primitives loads without the "Ambiguous use of -TAG_SIZE"
+    warning on perl 5.16 to 5.20.
   - The skill perl-crypt-age ships in .claude/skills/ for projects that call
     Crypt::Age: install it with skilletor as perl-crypt-age@p5-crypt-age.
 

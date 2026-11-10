@@ -447,7 +447,7 @@ sub decrypt_payload_fh {
                 if length($ct) == TAG_SIZE && $counter > 0;
         }
 
-        my $tag = substr($ct, -TAG_SIZE, TAG_SIZE, '');
+        my $tag = substr($ct, -(TAG_SIZE), TAG_SIZE, '');
 
         # The final-chunk flag lives in the nonce, so the only way to learn
         # which nonce the writer used is to authenticate under it -- the
