@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-10T17:29:59Z
+claimed_by: crypt-age-worker
+class: standard
+completed: 2026-11-10T17:29:59Z
+created: 2026-11-10T17:05:43Z
+id: 52
+priority: high
+started: 2026-11-10T17:29:59Z
+status: done
+tags:
+- release
+- prereqs
+- portability
+title: Perl floor is 5.18 by measurement, and Primitives.pm warns 'Ambiguous use of
+  -TAG_SIZE' up to 5.20
+updated: 2026-11-10T17:29:59Z
+---
+
+Hub pre-release smoke 2026-11-10 on the Linux smoker, requires only, every perl from 5.10 to 5.44: PASS from 5.18.4 on. 5.10.1 and 5.12.5 FAIL six files (t/02 "open on input string: No such file or directory" at line 17, t/03 "Invalid age input: cannot read" at line 47, t/05 "Cannot open input string" at line 102, t/06, t/07, t/08): the in-memory open of the input scalar fails there. 5.14.4 and 5.16.3 FAIL t/03-header.t line 858 only ("perl's in-memory open downgraded the caller's scalar, not our check"). On 5.16.3, 5.18.4 and 5.20.3 (not on 5.44.0) every load prints "Ambiguous use of -TAG_SIZE resolved as -&TAG_SIZE() at lib/Crypt/Age/Primitives.pm line 249" in the built file (source: substr($ct, -TAG_SIZE, TAG_SIZE, q{}) near line 450). Done = the cpanfile requires perl 5.018 (the measured floor; 5.010 was read off the syntax only), the negated constant is written so that no perl warns (-(TAG_SIZE) or TAG_SIZE()), a test loads every module with warnings fatal and fails on any warning at compile time, Changes entry for both.
+
+Commit bf7654f on k52-floor. t/09 verified able to fail (temp module with compile warning -> red); green on 5.40 before the fix, as agreed. Suite 932 tests pass; interop ran with age and rage on PATH.
