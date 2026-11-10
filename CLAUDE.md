@@ -61,9 +61,9 @@ boundaries are in `.claude/rules/crypt-age-rules.md`.
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live under `.claude/skills/` —
-`getty-perl-core`, `getty-perl-moo` and `getty-perl-release-author-getty` are hardlinked
-from `~/dev/skills/perl/`, `kanban-issues-karr-coordination` from `~/dev/karr/`; `crypt-age-core`
-is owned by this repo.
+`crypt-age-core`, `crypt-age-proof` and `perl-crypt-age` are owned by this repo; the shared
+`getty-perl-*` and `kanban-issues-karr-*` skills are installed by skilletor from
+`.claude/skilletor.json`.
 
 Work is coordinated on the repo's `karr` board (`karr board`).
 
