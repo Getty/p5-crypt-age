@@ -59,7 +59,7 @@ boundaries are in `.claude/rules/crypt-age-rules.md`.
 | Commits, `Changes`, card → done, pre-release audit | `crypt-age-release-manager` |
 | POD | `crypt-age-doc-writer` |
 
-The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
+The agents carry their skills via `skills:` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live under `.claude/skills/` —
 `crypt-age-core`, `crypt-age-proof` and `perl-crypt-age` are owned by this repo; the shared
 `getty-perl-*` and `kanban-issues-karr-*` skills are installed by skilletor from

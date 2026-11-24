@@ -2,13 +2,12 @@
 name: crypt-age-worker
 description: "Default Crypt::Age worker — implement, refactor and debug the pure-Perl age encryption format: header parsing and MAC, X25519 stanzas, Bech32 keys, STREAM payload chunking, the public API. Every change here can move bytes that the Go age binary has to accept. Pre-loaded with the age wire format and Getty's Perl conventions. Leaves a commit-ready tree; never commits — commits belong to crypt-age-release-manager."
 model: inherit
-briefing:
-  skills:
-    - crypt-age-core
-    - crypt-age-proof
-    - getty-perl-core
-    - getty-perl-moo
-    - kanban-issues-karr-ticket
+skills:
+  - crypt-age-core
+  - crypt-age-proof
+  - getty-perl-core
+  - getty-perl-moo
+  - kanban-issues-karr-ticket
 ---
 
 You are the crypt-age-worker for **Crypt::Age**, the pure-Perl implementation of the
